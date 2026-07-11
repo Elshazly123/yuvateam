@@ -1,0 +1,1920 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ساعة الحضور</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<style>
+  :root{
+    --bg-deep:#10182B;
+    --bg-deep-2:#182541;
+    --panel:#F6F3EC;
+    --panel-line:#E4DECD;
+    --ink:#B23A2E;
+    --ink-dark:#8C2C22;
+    --teal:#2F9C6E;
+    --teal-dark:#227853;
+    --gold:#D9A62B;
+    --text-dark:#1B1F2A;
+    --text-mute:#6B6455;
+    --text-light:#F6F3EC;
+    --danger:#C4453B;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:radial-gradient(circle at 20% 0%, var(--bg-deep-2), var(--bg-deep) 60%);
+    color:var(--text-dark);
+    font-family:'IBM Plex Sans Arabic', sans-serif;
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+  }
+  h1,h2,h3,.display{
+    font-family:'Cairo', sans-serif;
+    font-weight:800;
+    margin:0;
+  }
+  .mono{font-family:'IBM Plex Mono', monospace; letter-spacing:0.5px;}
+  a{color:inherit;}
+  button{font-family:inherit; cursor:pointer; border:none;}
+  button:focus-visible, input:focus-visible, select:focus-visible{
+    outline:3px solid var(--gold); outline-offset:2px;
+  }
+  ::selection{background:var(--gold); color:var(--text-dark);}
+
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:16px 28px; color:var(--text-light);
+    border-bottom:1px solid rgba(246,243,236,0.08);
+  }
+  .brand{display:flex; align-items:center; gap:12px;}
+  .brand-mark{
+    width:38px;height:38px;border-radius:10px;
+    background:linear-gradient(145deg, var(--gold), var(--ink));
+    display:flex;align-items:center;justify-content:center;
+    font-family:'Cairo',sans-serif; font-weight:800; color:var(--bg-deep); font-size:18px;
+    flex-shrink:0;
+  }
+  .brand-name{font-size:19px;}
+  .brand-sub{font-size:12px; color:rgba(246,243,236,0.55); margin-top:1px;}
+  .clock{font-size:15px; color:var(--gold); display:flex; gap:10px; align-items:baseline;}
+  .clock .date{color:rgba(246,243,236,0.6); font-size:12px;}
+  .who{display:flex; align-items:center; gap:14px;}
+  .who-name{font-size:14px; text-align:left;}
+  .who-role{font-size:11px; color:rgba(246,243,236,0.55);}
+  .logout-btn{
+    background:transparent; color:rgba(246,243,236,0.75);
+    border:1px solid rgba(246,243,236,0.25) !important;
+    padding:7px 14px; border-radius:999px; font-size:13px; transition:all .15s ease;
+  }
+  .logout-btn:hover{background:rgba(246,243,236,0.1); color:var(--text-light);}
+
+  main{flex:1; display:flex; flex-direction:column; align-items:center; padding:32px 20px 60px;}
+
+  .login-wrap{margin:auto; display:flex; flex-direction:column; align-items:center; gap:28px; width:100%;}
+  .punch-hero{display:flex; flex-direction:column; align-items:center; gap:8px; color:var(--text-light); text-align:center;}
+  .punch-hero .brand-mark{width:56px;height:56px;font-size:26px;border-radius:14px;}
+  .punch-hero h1{font-size:28px;}
+  .punch-hero p{margin:0; color:rgba(246,243,236,0.6); font-size:14px;}
+
+  .login-card{
+    background:var(--panel); border-radius:var(--radius); padding:30px 28px;
+    width:100%; max-width:360px; box-shadow:0 25px 60px -20px rgba(0,0,0,0.6);
+    border:1px solid var(--panel-line); position:relative; overflow:hidden;
+  }
+  .login-card::before{
+    content:""; position:absolute; inset:0 0 auto 0; height:6px;
+    background:repeating-linear-gradient(90deg, var(--ink) 0 14px, transparent 14px 24px);
+    opacity:0.5;
+  }
+  .field{margin-bottom:16px;}
+  .field label{display:block; font-size:12px; color:var(--text-mute); margin-bottom:6px; font-weight:600;}
+  .field input, .field select{
+    width:100%; padding:11px 13px; border-radius:9px; border:1.5px solid var(--panel-line);
+    background:#fff; font-size:14px; font-family:inherit; color:var(--text-dark);
+  }
+  .field input:focus, .field select:focus{border-color:var(--ink);}
+  .primary-btn{
+    width:100%; padding:13px; border-radius:9px; background:var(--ink); color:#fff;
+    font-weight:600; font-size:15px; transition:background .15s ease, transform .1s ease;
+  }
+  .primary-btn:hover{background:var(--ink-dark);}
+  .primary-btn:active{transform:scale(0.98);}
+  .primary-btn:disabled{opacity:0.55; cursor:not-allowed;}
+  .ghost-btn{background:transparent; color:var(--text-mute); font-size:13px; padding:8px; text-decoration:underline;}
+  .error-msg{
+    background:rgba(196,69,59,0.1); color:var(--danger); border:1px solid rgba(196,69,59,0.3);
+    padding:9px 12px; border-radius:8px; font-size:13px; margin-bottom:14px;
+  }
+
+  .dash{width:100%; max-width:1000px; display:flex; flex-direction:column; gap:22px;}
+  .panel{background:var(--panel); border-radius:var(--radius); padding:24px; border:1px solid rgba(255,255,255,0.06);}
+  .panel h2{font-size:18px; margin-bottom:4px;}
+  .panel .sub{color:var(--text-mute); font-size:13px; margin-bottom:18px;}
+
+  .punchcard{
+    background:#fff; border-radius:12px; border:1.5px dashed var(--panel-line);
+    padding:26px; display:flex; flex-direction:column; align-items:center; gap:16px;
+    position:relative; text-align:center;
+  }
+  .status-pill{display:inline-flex; align-items:center; gap:7px; padding:6px 14px; border-radius:999px; font-size:13px; font-weight:600;}
+  .status-pill.in{background:rgba(47,156,110,0.12); color:var(--teal-dark);}
+  .status-pill.out{background:rgba(178,58,46,0.1); color:var(--ink);}
+  .status-dot{width:8px;height:8px;border-radius:50%;}
+  .status-pill.in .status-dot{background:var(--teal);}
+  .status-pill.out .status-dot{background:var(--ink);}
+
+  .punch-btn{
+    width:170px; height:170px; border-radius:50%;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;
+    font-family:'Cairo',sans-serif; font-weight:800; font-size:19px; color:#fff;
+    box-shadow:0 14px 30px -10px rgba(0,0,0,0.35); transition:transform .12s ease;
+  }
+  .punch-btn:hover{transform:scale(1.03);}
+  .punch-btn:active{transform:scale(0.97);}
+  .punch-btn.act-in{background:radial-gradient(circle at 35% 30%, var(--teal), var(--teal-dark));}
+  .punch-btn.act-out{background:radial-gradient(circle at 35% 30%, var(--ink), var(--ink-dark));}
+  .punch-btn small{font-family:'IBM Plex Sans Arabic',sans-serif; font-weight:500; font-size:12px; opacity:0.85;}
+  .last-stamp{font-size:12.5px; color:var(--text-mute);}
+  .last-stamp b{color:var(--text-dark);}
+
+  table{width:100%; border-collapse:collapse; font-size:13.5px;}
+  th{text-align:right; color:var(--text-mute); font-weight:600; font-size:12px; padding:9px 10px; border-bottom:1.5px solid var(--panel-line);}
+  td{padding:10px 10px; border-bottom:1px solid var(--panel-line); vertical-align:middle;}
+  tr:last-child td{border-bottom:none;}
+  .type-tag{display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600; padding:4px 10px; border-radius:999px;}
+  .type-tag.in{background:rgba(47,156,110,0.12); color:var(--teal-dark);}
+  .type-tag.out{background:rgba(178,58,46,0.1); color:var(--ink);}
+  .empty-row{text-align:center; color:var(--text-mute); padding:30px 10px; font-size:13px;}
+  th.sortable{cursor:pointer; user-select:none;}
+  th.sortable:hover{color:var(--text-dark);}
+  .search-box{width:100%; max-width:280px;}
+
+  .filters{display:flex; gap:12px; margin-bottom:16px; flex-wrap:wrap;}
+  .filters .field{margin:0; min-width:160px; flex:1;}
+
+  .stat-row{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; margin-bottom:20px;}
+  .stat-card{background:#fff; border-radius:10px; padding:16px; border:1px solid var(--panel-line);}
+  .stat-card .num{font-family:'Cairo',sans-serif; font-weight:800; font-size:26px; color:var(--text-dark);}
+  .stat-card .lbl{font-size:12px; color:var(--text-mute); margin-top:2px;}
+
+  .row-between{display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;}
+  .add-emp-btn{background:var(--bg-deep); color:var(--text-light); padding:10px 18px; border-radius:9px; font-size:13px; font-weight:600;}
+  .add-emp-btn:hover{background:var(--bg-deep-2);}
+
+  .modal-backdrop{
+    position:fixed; inset:0; background:rgba(16,24,43,0.72);
+    display:flex; align-items:center; justify-content:center; padding:20px; z-index:50;
+  }
+  .modal{
+    background:var(--panel); border-radius:16px; padding:30px 26px;
+    max-width:380px; width:100%; text-align:center; box-shadow:0 30px 70px -20px rgba(0,0,0,0.6);
+  }
+  .modal h3{font-size:18px; margin-bottom:6px;}
+  .modal .sub{color:var(--text-mute); font-size:13px; margin-bottom:22px;}
+
+  .scanner{
+    width:120px; height:120px; margin:0 auto 20px; position:relative;
+    display:flex; align-items:center; justify-content:center; border-radius:50%;
+    background:#fff; border:2px solid var(--panel-line);
+  }
+  .scanner svg{width:56px; height:56px;}
+  .scanner .ring{position:absolute; inset:0; border-radius:50%; stroke-dasharray:339; stroke-dashoffset:339;}
+  .scanner.scanning .ring{animation:ringfill 1.3s linear forwards;}
+  .scanner.done{border-color:var(--teal);}
+  @keyframes ringfill{ to{stroke-dashoffset:0;} }
+  .scan-status{font-size:13px; color:var(--text-mute); min-height:18px;}
+
+  .loc-row{display:flex; align-items:center; justify-content:center; gap:6px; font-size:12.5px; color:var(--text-mute); margin-bottom:18px;}
+  .loc-row.ok{color:var(--teal-dark);}
+  .loc-row.bad{color:var(--danger);}
+
+  .modal-actions{display:flex; gap:10px; margin-top:6px;}
+  .modal-actions button{flex:1;}
+  .secondary-btn{background:transparent; color:var(--text-mute); border:1.5px solid var(--panel-line) !important; padding:12px; border-radius:9px; font-size:14px;}
+  .secondary-btn:hover{background:rgba(0,0,0,0.03);}
+
+  .stamp-result{display:flex; flex-direction:column; align-items:center; gap:12px;}
+  .stamp-mark{
+    font-family:'Cairo',sans-serif; font-weight:800; font-size:22px; color:#fff;
+    padding:14px 26px; border-radius:10px; transform:rotate(-6deg) scale(0.5); opacity:0;
+    animation:stampIn .4s cubic-bezier(.2,1.4,.5,1) forwards; border:3px solid rgba(255,255,255,0.4);
+  }
+  .stamp-mark.in{background:var(--teal-dark);}
+  .stamp-mark.out{background:var(--ink);}
+  @keyframes stampIn{
+    0%{transform:rotate(-6deg) scale(2.2); opacity:0;}
+    60%{transform:rotate(-6deg) scale(0.92); opacity:1;}
+    100%{transform:rotate(-6deg) scale(1); opacity:1;}
+  }
+
+  .toast{
+    position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+    background:var(--bg-deep); color:var(--text-light); padding:12px 20px; border-radius:10px;
+    font-size:13.5px; box-shadow:0 15px 40px -10px rgba(0,0,0,0.5); z-index:80;
+    opacity:0; transition:opacity .25s ease; display:flex; align-items:center; gap:8px;
+  }
+  .toast.show{opacity:1;}
+  .toast.err{background:var(--danger);}
+
+  .boot-msg{color:rgba(246,243,236,0.6); margin:auto; font-size:14px; display:flex; flex-direction:column; align-items:center; gap:10px; text-align:center;}
+
+  @media (max-width:640px){
+    .topbar{padding:14px 16px;}
+    .who-name{display:none;}
+    main{padding:20px 12px 50px;}
+    .panel{padding:18px;}
+  }
+  @media (prefers-reduced-motion: reduce){
+    *{animation-duration:0.01ms !important; transition-duration:0.01ms !important;}
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-mark" id="brand-mark-icon">⏱</div>
+    <div>
+      <div class="brand-name" id="brand-name-text">ساعة الحضور</div>
+      <div class="brand-sub">نظام حضور وانصراف الموظفين</div>
+    </div>
+  </div>
+  <div id="topbar-right"></div>
+</div>
+
+<main id="app"></main>
+
+<script>
+/* ============ Firebase setup ============ */
+const firebaseConfig = {
+  apiKey: "AIzaSyDnP8L5kj4mzLiiQYme8nzA7hrd3ou11xI",
+  authDomain: "work-app-4fe46.firebaseapp.com",
+  projectId: "work-app-4fe46",
+  storageBucket: "work-app-4fe46.firebasestorage.app",
+  messagingSenderId: "805492846342",
+  appId: "1:805492846342:web:2547c641e401d8a752f887"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const usersCol = db.collection('users');
+const attendanceCol = db.collection('attendance');
+const settingsCol = db.collection('settings');
+const holidaysCol = db.collection('holidays');
+const departmentsCol = db.collection('departments');
+const leaveCol = db.collection('leaveRequests');
+const auditCol = db.collection('auditLog');
+const invitesCol = db.collection('invites');
+
+/* ============ App state ============ */
+let users = [];
+let attendance = [];
+let currentUser = null;
+let clockInterval = null;
+let bootError = false;
+let dashboardMonth = (() => {
+  const n = new Date();
+  return n.getFullYear() + '-' + String(n.getMonth()+1).padStart(2,'0');
+})();
+let settings = { workDays:[0,1,2,3,4,6], deductionPerDay:0, deductionPerLateMinute:0, currency:'جنيه', defaultStartTime:'09:00' };
+let holidays = [];
+let departments = [];
+let leaveRequests = [];
+let auditLog = [];
+let currentView = 'dashboard';
+let dashSortKey = null;
+let dashSortDir = -1;
+let pendingDeleteIds = new Set();
+let invites = [];
+let authScreenRendered = null;
+
+/* ============ Utilities ============ */
+function fmtTime(ts){ return new Date(ts).toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit'}); }
+function fmtDate(ts){ return new Date(ts).toLocaleDateString('ar-EG', {day:'2-digit', month:'2-digit', year:'numeric'}); }
+function todayKey(ts){ const d = new Date(ts); return d.getFullYear()+'-'+d.getMonth()+'-'+d.getDate(); }
+
+/* ============ Work schedule (configurable via Settings) ============ */
+function isWorkDay(date){ const wd = settings.workDays || [0,1,2,3,4,6]; return wd.includes(date.getDay()); }
+function dateKeyYMD(date){
+  return date.getFullYear() + '-' + String(date.getMonth()+1).padStart(2,'0') + '-' + String(date.getDate()).padStart(2,'0');
+}
+function isHoliday(date){ const key = dateKeyYMD(date); return holidays.some(h => h.date === key); }
+function holidayName(date){ const key = dateKeyYMD(date); const h = holidays.find(h => h.date === key); return h ? h.name : ''; }
+function hasApprovedLeave(userId, date){
+  const key = dateKeyYMD(date);
+  return leaveRequests.some(l => l.userId === userId && l.status === 'approved' && l.fromDate <= key && key <= l.toDate);
+}
+async function logAction(action, details){
+  try{
+    await auditCol.add({ ts: Date.now(), actorId: currentUser ? currentUser.id : null, actorName: currentUser ? currentUser.name : 'نظام', action, details: details || '' });
+  }catch(e){ /* non-critical */ }
+}
+function getDateRange(fromStr, toStr, workOnly){
+  const [fy,fm,fd] = fromStr.split('-').map(Number);
+  const [ty,tm,td] = toStr.split('-').map(Number);
+  const start = new Date(fy, fm-1, fd);
+  const end = new Date(ty, tm-1, td);
+  const dates = [];
+  for(let d = new Date(start); d <= end; d.setDate(d.getDate()+1)){
+    const day = new Date(d);
+    if(workOnly && (!isWorkDay(day) || isHoliday(day))) continue;
+    dates.push(day);
+  }
+  return dates;
+}
+function countFullMonthWorkDays(year, monthIdx){
+  const daysInMonth = new Date(year, monthIdx+1, 0).getDate();
+  let count = 0;
+  for(let d = 1; d <= daysInMonth; d++){
+    const date = new Date(year, monthIdx, d);
+    if(isWorkDay(date) && !isHoliday(date)) count++;
+  }
+  return count;
+}
+function fmtMinutes(mins){
+  if(mins <= 0) return '0 د';
+  const h = Math.floor(mins/60), m = mins%60;
+  if(h === 0) return `${m} د`;
+  if(m === 0) return `${h} س`;
+  return `${h} س ${m} د`;
+}
+function dayLabel(date){ return date.toLocaleDateString('ar-EG', {weekday:'long', day:'2-digit', month:'2-digit'}); }
+
+/* Returns per-day breakdown + aggregate stats for one employee within a given month (0-indexed month) */
+function computeEmployeeMonth(emp, year, month){
+  const today = new Date();
+  const startTime = emp.startTime || settings.defaultStartTime || '09:00';
+  const [sh, sm] = startTime.split(':').map(Number);
+  const daysInMonth = new Date(year, month+1, 0).getDate();
+  const myIns = attendance.filter(r => r.userId === emp.id && r.type === 'in');
+
+  const days = [];
+  let presentDays = 0, absentDays = 0, lateCount = 0, lateMinutesTotal = 0, workDaysCount = 0, leaveDays = 0, holidayDays = 0;
+
+  for(let d = 1; d <= daysInMonth; d++){
+    const date = new Date(year, month, d);
+    if(!isWorkDay(date)) continue;
+    if(date > today) continue; // future day, not evaluated yet
+
+    if(isHoliday(date)){
+      holidayDays++;
+      days.push({date, status:'holiday', label:holidayName(date)});
+      continue;
+    }
+    if(hasApprovedLeave(emp.id, date)){
+      leaveDays++;
+      days.push({date, status:'leave'});
+      continue;
+    }
+
+    workDaysCount++;
+    const dayRecs = myIns.filter(r => {
+      const rd = new Date(r.ts);
+      return rd.getFullYear() === year && rd.getMonth() === month && rd.getDate() === d;
+    }).sort((a,b) => a.ts - b.ts);
+
+    if(dayRecs.length === 0){
+      absentDays++;
+      days.push({date, status:'absent'});
+    } else {
+      presentDays++;
+      const firstIn = new Date(dayRecs[0].ts);
+      const expected = new Date(year, month, d, sh, sm);
+      const diffMin = Math.round((firstIn - expected) / 60000);
+      if(diffMin > 0){
+        lateCount++;
+        lateMinutesTotal += diffMin;
+        days.push({date, status:'late', ts:dayRecs[0].ts, lateMin:diffMin});
+      } else {
+        days.push({date, status:'ontime', ts:dayRecs[0].ts});
+      }
+    }
+  }
+  const deduction = (absentDays * (settings.deductionPerDay || 0)) + (lateMinutesTotal * (settings.deductionPerLateMinute || 0));
+  return { workDaysCount, presentDays, absentDays, lateCount, lateMinutesTotal, leaveDays, holidayDays, deduction, days };
+}
+function showToast(msg, isErr){
+  const old = document.querySelector('.toast');
+  if(old) old.remove();
+  const t = document.createElement('div');
+  t.className = 'toast' + (isErr ? ' err' : '');
+  t.textContent = msg;
+  document.body.appendChild(t);
+  requestAnimationFrame(()=> t.classList.add('show'));
+  setTimeout(()=>{ t.classList.remove('show'); setTimeout(()=>t.remove(), 300); }, 2600);
+}
+function showUndoToast(msg, onUndo){
+  const old = document.querySelector('.toast');
+  if(old) old.remove();
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.innerHTML = `<span>${msg}</span>`;
+  const btn = document.createElement('button');
+  btn.textContent = 'تراجع';
+  btn.style.cssText = 'background:transparent;border:1px solid rgba(246,243,236,0.4) !important;color:#fff;border-radius:999px;padding:4px 12px;font-size:12px;margin-right:4px;';
+  btn.onclick = () => { onUndo(); t.classList.remove('show'); setTimeout(()=>t.remove(), 300); };
+  t.appendChild(btn);
+  document.body.appendChild(t);
+  requestAnimationFrame(()=> t.classList.add('show'));
+  setTimeout(()=>{ if(document.body.contains(t)){ t.classList.remove('show'); setTimeout(()=>t.remove(), 300); } }, 6000);
+}
+
+/* ============ Header clock ============ */
+function renderTopbarRight(){
+  const el = document.getElementById('topbar-right');
+  if(!currentUser){
+    el.innerHTML = `<div class="clock"><span class="date" id="hdr-date"></span><span class="mono" id="hdr-time"></span></div>`;
+  } else {
+    el.innerHTML = `
+      <div style="display:flex; align-items:center; gap:18px;">
+        <div class="clock"><span class="date" id="hdr-date"></span><span class="mono" id="hdr-time"></span></div>
+        <div class="who">
+          <div>
+            <div class="who-name">${currentUser.name}</div>
+            <div class="who-role">${currentUser.role === 'manager' ? 'مدير' : currentUser.role === 'supervisor' ? 'مشرف (عرض فقط)' : 'موظف'}</div>
+          </div>
+          <button class="logout-btn" id="change-pass-btn">تغيير كلمة المرور</button>
+          <button class="logout-btn" id="logout-btn">تسجيل خروج</button>
+        </div>
+      </div>`;
+    document.getElementById('logout-btn').onclick = logout;
+    document.getElementById('change-pass-btn').onclick = openChangePasswordModal;
+  }
+  updateClock();
+  if(clockInterval) clearInterval(clockInterval);
+  clockInterval = setInterval(updateClock, 1000 * 30);
+}
+function updateClock(){
+  const now = new Date();
+  const d = document.getElementById('hdr-date');
+  const t = document.getElementById('hdr-time');
+  if(d) d.textContent = now.toLocaleDateString('ar-EG', {weekday:'long', day:'2-digit', month:'long'});
+  if(t) t.textContent = now.toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit'});
+}
+
+/* ============ Login ============ */
+function renderLogin(errMsg){
+  authScreenRendered = 'login';
+  renderTopbarRight();
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div class="login-wrap">
+      <div class="punch-hero">
+        <div class="brand-mark">⏱</div>
+        <h1>ساعة الحضور</h1>
+        <p>سجّل الدخول عشان تقيّد حضورك أو تتابع فريقك</p>
+      </div>
+      <div class="login-card">
+        ${errMsg ? `<div class="error-msg">${errMsg}</div>` : ''}
+        <div class="field">
+          <label for="login-user">اسم المستخدم</label>
+          <input id="login-user" type="text" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="مثال: ahmed">
+        </div>
+        <div class="field">
+          <label for="login-pass">كلمة المرور</label>
+          <input id="login-pass" type="password" autocomplete="current-password" placeholder="••••••••">
+        </div>
+        <button class="primary-btn" id="login-btn">تسجيل الدخول</button>
+        <button class="ghost-btn" id="show-signup-btn" style="width:100%; margin-top:4px;">مش عندك حساب؟ إنشاء حساب جديد</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('login-btn').onclick = doLogin;
+  document.getElementById('show-signup-btn').onclick = () => renderSignup();
+  document.getElementById('login-pass').addEventListener('keydown', e=>{ if(e.key === 'Enter') doLogin(); });
+  document.getElementById('login-user').focus();
+}
+function doLogin(){
+  const u = document.getElementById('login-user').value.trim();
+  const p = document.getElementById('login-pass').value;
+  const found = users.find(x => x.username.toLowerCase() === u.toLowerCase() && x.password === p);
+  if(!found){ renderLogin('اسم المستخدم أو كلمة المرور غير صحيحة'); return; }
+  currentUser = found;
+  route();
+}
+function logout(){ currentUser = null; currentView = 'dashboard'; renderLogin(); }
+
+/* ============ Signup ============ */
+function renderSignup(errMsg){
+  authScreenRendered = 'signup';
+  renderTopbarRight();
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div class="login-wrap">
+      <div class="punch-hero">
+        <div class="brand-mark">⏱</div>
+        <h1>إنشاء حساب جديد</h1>
+        <p>محتاج كود دعوة من مديرك عشان تقدر تعمل حساب</p>
+      </div>
+      <div class="login-card">
+        ${errMsg ? `<div class="error-msg">${errMsg}</div>` : ''}
+        <div class="field">
+          <label for="su-invite">كود الدعوة</label>
+          <input id="su-invite" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="اكتب الكود اللي وصلك">
+        </div>
+        <div class="field">
+          <label for="su-name">الاسم الكامل</label>
+          <input id="su-name" type="text" placeholder="مثال: محمد سيد">
+        </div>
+        <div class="field">
+          <label for="su-user">اسم المستخدم</label>
+          <input id="su-user" type="text" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="مثال: mohamed">
+        </div>
+        <div class="field">
+          <label for="su-pass">كلمة المرور</label>
+          <input id="su-pass" type="password" autocomplete="new-password" placeholder="••••••••">
+        </div>
+        <div class="field">
+          <label for="su-confirm">تأكيد كلمة المرور</label>
+          <input id="su-confirm" type="password" autocomplete="new-password" placeholder="••••••••">
+        </div>
+        <button class="primary-btn" id="signup-btn">إنشاء الحساب</button>
+        <button class="ghost-btn" id="show-login-btn" style="width:100%; margin-top:4px;">عندك حساب؟ تسجيل الدخول</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('signup-btn').onclick = doSignup;
+  document.getElementById('show-login-btn').onclick = () => renderLogin();
+  document.getElementById('su-confirm').addEventListener('keydown', e=>{ if(e.key === 'Enter') doSignup(); });
+  document.getElementById('su-invite').focus();
+}
+async function doSignup(){
+  const inviteCode = document.getElementById('su-invite').value.trim().toUpperCase();
+  const name = document.getElementById('su-name').value.trim();
+  const username = document.getElementById('su-user').value.trim();
+  const pass = document.getElementById('su-pass').value;
+  const confirm = document.getElementById('su-confirm').value;
+
+  if(!inviteCode || !name || !username || !pass){ renderSignup('من فضلك املأ كل الحقول'); return; }
+  const invite = invites.find(i => i.code === inviteCode && !i.used);
+  if(!invite){ renderSignup('كود الدعوة غير صحيح أو مستخدم قبل كده. اطلب كود جديد من مديرك'); return; }
+  if(pass.length < 4){ renderSignup('كلمة المرور لازم تكون 4 حروف/أرقام على الأقل'); return; }
+  if(pass !== confirm){ renderSignup('كلمة المرور وتأكيدها مش متطابقين'); return; }
+  if(users.some(u => u.username.toLowerCase() === username.toLowerCase())){
+    renderSignup('اسم المستخدم ده مستخدم بالفعل، جرب اسم تاني'); return;
+  }
+  try{
+    const docRef = await usersCol.add({ username, password: pass, name, role:'employee' });
+    await invitesCol.doc(invite.id).update({ used:true, usedBy:name, usedAt:Date.now() });
+    currentUser = { id: docRef.id, username, password: pass, name, role:'employee' };
+    showToast(`أهلًا بيك يا ${name}، تم إنشاء حسابك`);
+    logAction('انضمام موظف بدعوة', name);
+    route();
+  }catch(e){
+    renderSignup('حصلت مشكلة أثناء إنشاء الحساب، حاول تاني');
+  }
+}
+
+function updateBrandLogo(){
+  const icon = document.getElementById('brand-mark-icon');
+  const nameEl = document.getElementById('brand-name-text');
+  if(!icon) return;
+  if(settings.logoUrl){
+    icon.innerHTML = `<img src="${settings.logoUrl}" alt="logo" style="width:100%; height:100%; object-fit:cover; border-radius:10px;">`;
+  } else {
+    icon.textContent = '⏱';
+  }
+  if(nameEl && settings.companyName) nameEl.textContent = settings.companyName;
+}
+
+/* ============ Routing ============ */
+function route(){
+  updateBrandLogo();
+  if(!currentUser){
+    if(authScreenRendered === 'login' || authScreenRendered === 'signup') return;
+    renderLogin();
+    return;
+  }
+  authScreenRendered = null;
+  const fresh = users.find(u => u.id === currentUser.id);
+  if(fresh) currentUser = fresh;
+  renderTopbarRight();
+  if(currentUser.role === 'manager' && currentView === 'settings'){ renderSettingsPage(); return; }
+  if(currentUser.role === 'manager') renderManagerDashboard(true);
+  else if(currentUser.role === 'supervisor') renderManagerDashboard(false);
+  else renderEmployeeDashboard();
+}
+
+/* ============ Employee dashboard ============ */
+function getMyRecords(){
+  return attendance.filter(r => r.userId === currentUser.id).sort((a,b)=> b.ts - a.ts);
+}
+function getNextAction(){
+  const mine = getMyRecords();
+  if(mine.length === 0) return 'in';
+  return mine[0].type === 'in' ? 'out' : 'in';
+}
+function renderEmployeeDashboard(){
+  const app = document.getElementById('app');
+  const nextAction = getNextAction();
+  const mine = getMyRecords();
+  const last = mine[0];
+
+  app.innerHTML = `
+    <div class="dash">
+      <div class="panel">
+        <h2>تسجيل الحضور</h2>
+        <div class="sub">اضغط الزر لتسجيل ${nextAction === 'in' ? 'حضورك' : 'انصرافك'} الآن</div>
+        <div class="punchcard">
+          <span class="status-pill ${nextAction === 'in' ? 'out' : 'in'}">
+            <span class="status-dot"></span>
+            ${nextAction === 'in' ? 'خارج العمل حاليًا' : 'داخل العمل حاليًا'}
+          </span>
+          <button class="punch-btn ${nextAction === 'in' ? 'act-in' : 'act-out'}" id="punch-btn">
+            ${nextAction === 'in' ? '↩' : '↪'}
+            <span>${nextAction === 'in' ? 'تسجيل حضور' : 'تسجيل انصراف'}</span>
+            <small>اضغط للمتابعة</small>
+          </button>
+          <div class="last-stamp">
+            ${last ? `آخر تسجيل: <b>${last.type === 'in' ? 'حضور' : 'انصراف'}</b> — ${fmtDate(last.ts)} الساعة ${fmtTime(last.ts)}` : 'لسه معملتش أي تسجيل'}
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>سجل حضوري</h2>
+        <div class="sub">آخر التسجيلات الخاصة بيك فقط</div>
+        ${renderAttendanceTable(mine, false)}
+      </div>
+
+      <div class="panel">
+        <div class="row-between" style="margin-bottom:16px;">
+          <div>
+            <h2 style="margin-bottom:2px;">طلبات الإجازة</h2>
+            <div class="sub" style="margin-bottom:0;">طلباتك وحالتها</div>
+          </div>
+          <button class="add-emp-btn" id="req-leave-btn">+ طلب إجازة جديدة</button>
+        </div>
+        <div id="leave-mgr-list"></div>
+      </div>
+    </div>
+  `;
+  document.getElementById('punch-btn').onclick = () => openPunchModal(nextAction);
+  document.getElementById('req-leave-btn').onclick = openLeaveRequestModal;
+  renderLeaveList(false);
+}
+
+/* ============ Punch modal (GPS + simulated fingerprint) ============ */
+function openPunchModal(type){
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal" id="punch-modal">
+      <h3>${type === 'in' ? 'تأكيد الحضور' : 'تأكيد الانصراف'}</h3>
+      <div class="sub">هنتأكد من موقعك وهويتك قبل التسجيل</div>
+      <div class="loc-row" id="loc-row">📍 جاري تحديد الموقع...</div>
+      <div class="scanner" id="scanner">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#B23A2E" stroke-width="1.6">
+          <path d="M12 2c-3 0-5.5 2.2-5.5 5.2 0 1.7.5 2.7.5 4.3 0 3.5-1.5 5.8-3 7.5" stroke-linecap="round"/>
+          <path d="M12 2c3 0 5.5 2.2 5.5 5.2 0 3-1 4-1 7 0 2 .5 3.5 1.5 5" stroke-linecap="round"/>
+          <path d="M8.5 7.2C8.5 5.3 10 4 12 4s3.5 1.3 3.5 3.2c0 3.3 1 5 1 8.3" stroke-linecap="round"/>
+          <path d="M6.5 12c0 4-1 6.5-2.5 8.5" stroke-linecap="round"/>
+          <path d="M15.5 12.5c0 2.7.3 4.7 1.3 6.5" stroke-linecap="round"/>
+          <path d="M10 9.5c0 4 .5 6.5 3 9.5" stroke-linecap="round"/>
+        </svg>
+        <svg class="ring" viewBox="0 0 120 120" style="position:absolute; inset:0;">
+          <circle cx="60" cy="60" r="54" fill="none" stroke="#2F9C6E" stroke-width="4"/>
+        </svg>
+      </div>
+      <div class="scan-status" id="scan-status">اضغط "تأكيد بالبصمة" للمتابعة</div>
+      <div class="modal-actions">
+        <button class="secondary-btn" id="cancel-punch">إلغاء</button>
+        <button class="primary-btn" id="confirm-punch">تأكيد بالبصمة</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+
+  let coords = null;
+  const locRow = backdrop.querySelector('#loc-row');
+
+  if('geolocation' in navigator){
+    try{
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          coords = {lat: pos.coords.latitude.toFixed(5), lng: pos.coords.longitude.toFixed(5)};
+          locRow.textContent = `📍 تم تحديد الموقع (${coords.lat}, ${coords.lng})`;
+          locRow.className = 'loc-row ok';
+        },
+        err => {
+          locRow.textContent = '📍 تعذّر الوصول للموقع — هيتسجل بدون إحداثيات';
+          locRow.className = 'loc-row bad';
+        },
+        {timeout:8000}
+      );
+    }catch(e){
+      locRow.textContent = '📍 الموقع غير متاح هنا — هيتسجل بدون إحداثيات';
+      locRow.className = 'loc-row bad';
+    }
+  } else {
+    locRow.textContent = '📍 الموقع غير مدعوم على هذا الجهاز';
+    locRow.className = 'loc-row bad';
+  }
+
+  backdrop.querySelector('#cancel-punch').onclick = () => backdrop.remove();
+  backdrop.querySelector('#confirm-punch').onclick = (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    backdrop.querySelector('#cancel-punch').disabled = true;
+    const scanner = backdrop.querySelector('#scanner');
+    const status = backdrop.querySelector('#scan-status');
+    scanner.classList.add('scanning');
+    status.textContent = 'جاري التحقق من البصمة...';
+    setTimeout(async () => {
+      scanner.classList.remove('scanning');
+      scanner.classList.add('done');
+      status.textContent = 'تم التحقق ✓';
+      await finalizePunch(type, coords, backdrop);
+    }, 1300);
+  };
+}
+
+async function finalizePunch(type, coords, backdrop){
+  const record = {
+    userId: currentUser.id,
+    name: currentUser.name,
+    username: currentUser.username,
+    type: type,
+    ts: Date.now(),
+    lat: coords ? coords.lat : null,
+    lng: coords ? coords.lng : null
+  };
+  let ok = true;
+  try{ await attendanceCol.add(record); }catch(e){ ok = false; }
+
+  const modal = backdrop.querySelector('#punch-modal');
+  const kiosk = !!settings.kioskMode;
+  modal.innerHTML = `
+    <div class="stamp-result">
+      <div class="stamp-mark ${type}">${type === 'in' ? 'تم تسجيل الحضور' : 'تم تسجيل الانصراف'}</div>
+      <div class="sub" style="margin:0;">${fmtDate(record.ts)} — الساعة ${fmtTime(record.ts)}${kiosk ? ' — شكرًا ' + currentUser.name : ''}</div>
+      <button class="primary-btn" id="close-modal" style="margin-top:10px;">${kiosk ? 'تمام (هيرجع لشاشة الدخول)' : 'تمام'}</button>
+    </div>
+  `;
+  const finish = () => {
+    backdrop.remove();
+    if(!ok) showToast('حصلت مشكلة في حفظ التسجيل، حاول تاني', true);
+    if(kiosk) logout(); else route();
+  };
+  modal.querySelector('#close-modal').onclick = finish;
+  if(kiosk) setTimeout(() => { if(document.body.contains(backdrop)) finish(); }, 4000);
+}
+
+/* ============ Attendance table ============ */
+function renderAttendanceTable(records, showName){
+  if(records.length === 0) return `<div class="empty-row">مفيش تسجيلات لسه</div>`;
+  const rows = records.slice(0, 100).map(r => `
+    <tr>
+      ${showName ? `<td>${r.name}</td>` : ''}
+      <td>${fmtDate(r.ts)}</td>
+      <td>${fmtTime(r.ts)}</td>
+      <td><span class="type-tag ${r.type}">${r.type === 'in' ? 'حضور' : 'انصراف'}</span></td>
+      <td class="mono" style="color:var(--text-mute); font-size:11.5px;">${r.lat ? `${r.lat}, ${r.lng}` : '—'}</td>
+    </tr>
+  `).join('');
+  return `
+    <table>
+      <thead><tr>
+        ${showName ? '<th>الاسم</th>' : ''}
+        <th>التاريخ</th><th>الوقت</th><th>النوع</th><th>الموقع</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+/* ============ Manager dashboard ============ */
+function renderManagerDashboard(isManager){
+  const app = document.getElementById('app');
+  const employees = users.filter(u => u.role === 'employee' && !pendingDeleteIds.has(u.id));
+  const todayStr = todayKey(Date.now());
+  const presentToday = new Set(
+    attendance.filter(r => todayKey(r.ts) === todayStr && r.type === 'in').map(r => r.userId)
+  );
+  const deptName = (id) => { const d = departments.find(x => x.id === id); return d ? d.name : '—'; };
+  const pendingLeaves = leaveRequests.filter(l => l.status === 'pending').sort((a,b)=> b.requestedAt - a.requestedAt);
+
+  const today = new Date();
+  const todayIsWorkDay = isWorkDay(today) && !isHoliday(today);
+  const lateTodayNames = [], notYetNames = [];
+  if(todayIsWorkDay){
+    employees.forEach(e => {
+      if(hasApprovedLeave(e.id, today)) return;
+      const myTodayIns = attendance.filter(r => r.userId === e.id && r.type === 'in' && todayKey(r.ts) === todayStr).sort((a,b)=> a.ts - b.ts);
+      if(myTodayIns.length === 0){ notYetNames.push(e.name); return; }
+      const [sh, sm] = (e.startTime || settings.defaultStartTime || '09:00').split(':').map(Number);
+      const expected = new Date(today.getFullYear(), today.getMonth(), today.getDate(), sh, sm);
+      const diffMin = Math.round((new Date(myTodayIns[0].ts) - expected) / 60000);
+      if(diffMin > 0) lateTodayNames.push(`${e.name} (${fmtMinutes(diffMin)})`);
+    });
+  }
+
+  app.innerHTML = `
+    <div class="dash">
+      <div class="panel">
+        <div class="row-between" style="margin-bottom:${isManager ? '16px':'0'};">
+          <div class="stat-row" style="margin:0; flex:1;">
+            <div class="stat-card"><div class="num">${employees.length}</div><div class="lbl">إجمالي الموظفين</div></div>
+            <div class="stat-card"><div class="num">${presentToday.size}</div><div class="lbl">حضروا النهاردة</div></div>
+            <div class="stat-card"><div class="num">${Math.max(employees.length - presentToday.size, 0)}</div><div class="lbl">لسه ما حضرش</div></div>
+            <div class="stat-card"><div class="num">${pendingLeaves.length}</div><div class="lbl">طلبات إجازة معلقة</div></div>
+          </div>
+        </div>
+        ${!todayIsWorkDay ? `<div class="sub" style="margin:10px 0 0;">النهاردة مش يوم شغل رسمي (عطلة أو آخر الأسبوع)</div>` : (lateTodayNames.length || notYetNames.length) ? `
+        <div style="display:flex; gap:16px; flex-wrap:wrap; margin-top:14px;">
+          ${lateTodayNames.length ? `
+          <div style="flex:1; min-width:220px;">
+            <div style="font-size:12px; font-weight:600; color:var(--ink); margin-bottom:6px;">متأخرين النهاردة (${lateTodayNames.length})</div>
+            <div style="display:flex; flex-wrap:wrap; gap:6px;">${lateTodayNames.map(n => `<span class="type-tag out">${n}</span>`).join('')}</div>
+          </div>` : ''}
+          ${notYetNames.length ? `
+          <div style="flex:1; min-width:220px;">
+            <div style="font-size:12px; font-weight:600; color:var(--text-mute); margin-bottom:6px;">لسه ما حضروش (${notYetNames.length})</div>
+            <div style="display:flex; flex-wrap:wrap; gap:6px;">${notYetNames.map(n => `<span class="type-tag out">${n}</span>`).join('')}</div>
+          </div>` : ''}
+        </div>` : `<div class="sub" style="margin:10px 0 0;">الحمد لله، الكل حاضر وفي الميعاد لحد دلوقتي ✅</div>`}
+        ${isManager ? `<div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap;">
+          <button class="add-emp-btn" id="open-settings-btn">⚙️ الإعدادات العامة</button>
+          <button class="secondary-btn" id="manual-entry-btn" style="width:auto; padding:10px 18px;">✍️ تسجيل حضور يدوي</button>
+        </div>` : ''}
+      </div>
+
+      <div class="panel">
+        <div class="row-between" style="margin-bottom:6px;">
+          <div>
+            <h2 style="margin-bottom:2px;">داشبورد الأداء الشهري</h2>
+            <div class="sub" style="margin-bottom:0;">حضور، غياب، تأخير، والخصم المتوقع لكل موظف</div>
+          </div>
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <div class="field" style="margin:0; min-width:150px;">
+              <select id="dash-dept-filter">
+                <option value="">كل الأقسام</option>
+                ${departments.map(d => `<option value="${d.id}">${d.name}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field" style="margin:0; min-width:170px;">
+              <input type="month" id="dash-month" value="${dashboardMonth}">
+            </div>
+            <button class="secondary-btn" id="export-csv-btn" style="width:auto; padding:11px 16px;">⬇ تصدير Excel</button>
+          </div>
+        </div>
+        <div id="dash-content"></div>
+      </div>
+
+      <div class="panel">
+        <h2 style="margin-bottom:2px;">طلبات الإجازة</h2>
+        <div class="sub">${isManager ? 'راجع ووافق أو ارفض طلبات الموظفين' : 'كل طلبات الإجازة في الشركة'}</div>
+        <div id="leave-mgr-list"></div>
+      </div>
+
+      <div class="panel">
+        <div class="row-between" style="margin-bottom:16px;">
+          <div>
+            <h2 style="margin-bottom:2px;">الموظفون</h2>
+            <div class="sub" style="margin-bottom:0;">إدارة حسابات الدخول</div>
+          </div>
+          ${isManager ? `<button class="add-emp-btn" id="add-emp-btn">+ إضافة موظف</button>` : ''}
+        </div>
+        <input type="text" id="emp-search" class="search-box" placeholder="🔍 بحث بالاسم أو اسم المستخدم..." style="margin-bottom:14px; padding:10px 13px; border-radius:9px; border:1.5px solid var(--panel-line); font-size:13px; font-family:inherit;">
+        <table>
+          <thead><tr><th>الاسم</th><th>اسم المستخدم</th><th>القسم</th><th>الحالة اليوم</th>${isManager ? '<th>إجراءات</th>' : ''}</tr></thead>
+          <tbody id="emp-tbody">
+            ${employees.length === 0 ? `<tr><td colspan="${isManager ? 5 : 4}" class="empty-row">مفيش موظفين مضافين لسه</td></tr>` :
+              employees.map(e => `
+                <tr data-name="${e.name.toLowerCase()} ${e.username.toLowerCase()}">
+                  <td>${e.name}</td>
+                  <td class="mono">${e.username}</td>
+                  <td>${deptName(e.departmentId)}</td>
+                  <td><span class="status-pill ${presentToday.has(e.id) ? 'in' : 'out'}">
+                    <span class="status-dot"></span>${presentToday.has(e.id) ? 'حاضر' : 'غير مسجل'}
+                  </span></td>
+                  ${isManager ? `
+                  <td style="white-space:nowrap;">
+                    <button class="secondary-btn" style="padding:6px 10px; font-size:12px; width:auto; display:inline-block;" data-edit="${e.id}">بيانات الموظف</button>
+                    <button class="secondary-btn" style="padding:6px 10px; font-size:12px; width:auto; display:inline-block;" data-reset="${e.id}">تغيير الباسورد</button>
+                    <button class="secondary-btn" style="padding:6px 10px; font-size:12px; width:auto; display:inline-block; color:var(--danger); border-color:rgba(196,69,59,0.4) !important;" data-remove="${e.id}">حذف</button>
+                  </td>` : ''}
+                </tr>
+              `).join('')}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="panel">
+        <h2>سجل الحضور والانصراف</h2>
+        <div class="sub">كل تسجيلات الفريق</div>
+        <div class="filters">
+          <div class="field">
+            <label for="filter-search">بحث بالاسم</label>
+            <input type="text" id="filter-search" placeholder="🔍 اكتب اسم الموظف...">
+          </div>
+          <div class="field">
+            <label for="filter-emp">تصفية حسب الموظف</label>
+            <select id="filter-emp">
+              <option value="">كل الموظفين</option>
+              ${employees.map(e => `<option value="${e.id}">${e.name}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label for="filter-date">تصفية حسب اليوم</label>
+            <input type="date" id="filter-date">
+          </div>
+        </div>
+        <div id="mgr-table">${renderAttendanceTable(attendance.slice().sort((a,b)=>b.ts-a.ts), true)}</div>
+      </div>
+
+      ${isManager ? `
+      <div class="panel">
+        <h2>سجل العمليات</h2>
+        <div class="sub">آخر التعديلات الإدارية على النظام</div>
+        <div id="audit-list"></div>
+      </div>` : ''}
+    </div>
+  `;
+
+  renderDashboardMonth();
+  document.getElementById('dash-month').onchange = (e) => {
+    dashboardMonth = e.target.value || dashboardMonth;
+    renderDashboardMonth();
+  };
+  document.getElementById('dash-dept-filter').onchange = renderDashboardMonth;
+  document.getElementById('export-csv-btn').onclick = exportMonthlyCsv;
+
+  document.getElementById('emp-search').oninput = (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    document.querySelectorAll('#emp-tbody tr[data-name]').forEach(tr => {
+      tr.style.display = tr.getAttribute('data-name').includes(q) ? '' : 'none';
+    });
+  };
+
+  renderLeaveList(isManager);
+
+  if(isManager){
+    document.getElementById('open-settings-btn').onclick = renderSettingsPage;
+    document.getElementById('manual-entry-btn').onclick = () => openManualEntryModal(employees);
+    document.getElementById('add-emp-btn').onclick = openAddEmployeeModal;
+    app.querySelectorAll('[data-edit]').forEach(btn => {
+      btn.onclick = () => openEditEmployeeModal(btn.getAttribute('data-edit'));
+    });
+    app.querySelectorAll('[data-reset]').forEach(btn => {
+      btn.onclick = () => openResetEmployeePasswordModal(btn.getAttribute('data-reset'));
+    });
+    app.querySelectorAll('[data-remove]').forEach(btn => {
+      btn.onclick = () => removeEmployee(btn.getAttribute('data-remove'));
+    });
+    renderAuditList();
+  }
+
+  const applyFilters = () => {
+    const empId = document.getElementById('filter-emp').value;
+    const dateVal = document.getElementById('filter-date').value;
+    const nameQ = document.getElementById('filter-search').value.trim().toLowerCase();
+    let filtered = attendance.slice();
+    if(empId) filtered = filtered.filter(r => r.userId === empId);
+    if(nameQ) filtered = filtered.filter(r => (r.name || '').toLowerCase().includes(nameQ));
+    if(dateVal){
+      const [y,m,d] = dateVal.split('-').map(Number);
+      filtered = filtered.filter(r => {
+        const rd = new Date(r.ts);
+        return rd.getFullYear() === y && (rd.getMonth()+1) === m && rd.getDate() === d;
+      });
+    }
+    filtered.sort((a,b)=> b.ts - a.ts);
+    document.getElementById('mgr-table').innerHTML = renderAttendanceTable(filtered, true);
+  };
+  document.getElementById('filter-emp').onchange = applyFilters;
+  document.getElementById('filter-date').onchange = applyFilters;
+  document.getElementById('filter-search').oninput = applyFilters;
+}
+
+/* ============ Monthly dashboard (attendance / absence / lateness / deductions) ============ */
+function renderDashboardMonth(){
+  const box = document.getElementById('dash-content');
+  if(!box) return;
+  const [year, month] = dashboardMonth.split('-').map(Number);
+  const deptFilterEl = document.getElementById('dash-dept-filter');
+  const deptFilter = deptFilterEl ? deptFilterEl.value : '';
+  let employees = users.filter(u => u.role === 'employee' && !pendingDeleteIds.has(u.id));
+  if(deptFilter) employees = employees.filter(e => e.departmentId === deptFilter);
+
+  if(employees.length === 0){
+    box.innerHTML = `<div class="empty-row">مفيش موظفين لسه عشان نعرض بياناتهم</div>`;
+    return;
+  }
+
+  // <input type="month"> gives a 1-indexed month; JS Date wants 0-indexed
+  let rows = employees.map(e => ({ emp: e, stats: computeEmployeeMonth(e, year, month-1) }));
+  if(dashSortKey){
+    rows.sort((a,b) => (a.stats[dashSortKey] - b.stats[dashSortKey]) * dashSortDir);
+  }
+  const totalWorkDays = rows.length ? rows[0].stats.workDaysCount : 0;
+  const totalWorkDaysFullMonth = countFullMonthWorkDays(year, month-1);
+  const totalAbsences = rows.reduce((s,r)=> s + r.stats.absentDays, 0);
+  const totalLate = rows.reduce((s,r)=> s + r.stats.lateCount, 0);
+  const totalDeduction = rows.reduce((s,r)=> s + r.stats.deduction, 0);
+  const avgAttendanceRate = totalWorkDays > 0
+    ? Math.round((rows.reduce((s,r)=> s + r.stats.presentDays, 0) / (rows.length * totalWorkDays)) * 100)
+    : 0;
+
+  const barsHtml = rows.map(r => {
+    const rate = r.stats.workDaysCount > 0 ? Math.round((r.stats.presentDays / r.stats.workDaysCount) * 100) : 0;
+    const barColor = rate >= 90 ? 'var(--teal)' : rate >= 75 ? 'var(--gold)' : 'var(--ink)';
+    return `
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+        <div style="width:110px; font-size:12px; flex-shrink:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${r.emp.name}</div>
+        <div style="flex:1; background:var(--panel-line); border-radius:6px; height:16px; overflow:hidden;">
+          <div style="width:${rate}%; background:${barColor}; height:100%; border-radius:6px;"></div>
+        </div>
+        <div class="mono" style="width:40px; font-size:12px; text-align:left; flex-shrink:0;">${rate}%</div>
+      </div>`;
+  }).join('');
+
+  box.innerHTML = `
+    <div class="stat-row">
+      <div class="stat-card"><div class="num">${totalWorkDays}</div><div class="lbl">أيام العمل حتى الآن (من إجمالي ${totalWorkDaysFullMonth})</div></div>
+      <div class="stat-card"><div class="num">${avgAttendanceRate}%</div><div class="lbl">متوسط نسبة الحضور</div></div>
+      <div class="stat-card"><div class="num">${totalAbsences}</div><div class="lbl">إجمالي أيام الغياب</div></div>
+      <div class="stat-card"><div class="num">${totalLate}</div><div class="lbl">إجمالي مرات التأخير</div></div>
+    </div>
+    <div style="margin-bottom:22px;">${barsHtml}</div>
+    <table>
+      <thead><tr>
+        <th>الموظف</th><th>الحضور (حتى الآن)</th><th class="sortable" data-sort="absentDays">أيام الغياب ⇅</th><th class="sortable" data-sort="lateCount">مرات التأخير ⇅</th><th class="sortable" data-sort="lateMinutesTotal">إجمالي وقت التأخير ⇅</th><th class="sortable" data-sort="deduction">الخصم المتوقع ⇅</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${rows.map(r => `
+          <tr>
+            <td>${r.emp.name}</td>
+            <td>${r.stats.presentDays} / ${r.stats.workDaysCount}</td>
+            <td>${r.stats.absentDays > 0 ? `<span class="type-tag out">${r.stats.absentDays}</span>` : '0'}</td>
+            <td>${r.stats.lateCount > 0 ? `<span class="type-tag out">${r.stats.lateCount}</span>` : '0'}</td>
+            <td class="mono">${fmtMinutes(r.stats.lateMinutesTotal)}</td>
+            <td class="mono">${r.stats.deduction > 0 ? `${r.stats.deduction.toFixed(2)} ${settings.currency}` : '—'}</td>
+            <td><button class="secondary-btn" style="padding:6px 10px; font-size:12px; width:auto;" data-detail="${r.emp.id}">التفاصيل</button></td>
+          </tr>
+        `).join('')}
+        <tr style="font-weight:700;">
+          <td>الإجمالي</td><td>—</td><td>${totalAbsences}</td><td>${totalLate}</td><td>—</td>
+          <td class="mono">${totalDeduction > 0 ? `${totalDeduction.toFixed(2)} ${settings.currency}` : '—'}</td><td></td>
+        </tr>
+      </tbody>
+    </table>
+  `;
+  box.querySelectorAll('[data-detail]').forEach(btn => {
+    btn.onclick = () => openEmployeeMonthDetail(btn.getAttribute('data-detail'), year, month-1);
+  });
+  box.querySelectorAll('.sortable').forEach(th => {
+    th.onclick = () => {
+      const key = th.getAttribute('data-sort');
+      if(dashSortKey === key) dashSortDir *= -1;
+      else { dashSortKey = key; dashSortDir = -1; }
+      renderDashboardMonth();
+    };
+  });
+}
+
+function exportMonthlyCsv(){
+  const [year, month] = dashboardMonth.split('-').map(Number);
+  const deptFilterEl = document.getElementById('dash-dept-filter');
+  const deptFilter = deptFilterEl ? deptFilterEl.value : '';
+  let employees = users.filter(u => u.role === 'employee' && !pendingDeleteIds.has(u.id));
+  if(deptFilter) employees = employees.filter(e => e.departmentId === deptFilter);
+  if(employees.length === 0){ showToast('مفيش بيانات لتصديرها', true); return; }
+
+  const rows = employees.map(e => ({ emp: e, stats: computeEmployeeMonth(e, year, month-1) }));
+  const header = ['الاسم','أيام العمل','أيام الحضور','أيام الغياب','مرات التأخير','إجمالي دقايق التأخير',`الخصم (${settings.currency})`];
+  const lines = [header.join(',')];
+  rows.forEach(r => {
+    lines.push([
+      `"${r.emp.name}"`, r.stats.workDaysCount, r.stats.presentDays, r.stats.absentDays,
+      r.stats.lateCount, r.stats.lateMinutesTotal, r.stats.deduction.toFixed(2)
+    ].join(','));
+  });
+  const csv = '\uFEFF' + lines.join('\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `تقرير-الحضور-${dashboardMonth}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function openEmployeeMonthDetail(empId, year, monthIdx){
+  const emp = users.find(u => u.id === empId);
+  if(!emp) return;
+  const stats = computeEmployeeMonth(emp, year, monthIdx);
+  const monthName = new Date(year, monthIdx, 1).toLocaleDateString('ar-EG', {month:'long', year:'numeric'});
+
+  const statusLabel = { absent:'غائب', late:'حضر متأخر', ontime:'حضر في الميعاد', leave:'إجازة معتمدة', holiday:'عطلة رسمية' };
+  const statusClass = { absent:'out', late:'out', ontime:'in', leave:'in', holiday:'in' };
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal" style="max-width:480px; text-align:right;">
+      <h3 style="text-align:center;">${emp.name}</h3>
+      <div class="sub" style="text-align:center;">تفاصيل شهر ${monthName} — ميعاده الرسمي ${emp.startTime || '09:00'}</div>
+      <div style="max-height:340px; overflow-y:auto; margin-bottom:16px;">
+        <table>
+          <thead><tr><th>اليوم</th><th>الحالة</th><th>وقت الحضور</th><th>التأخير</th></tr></thead>
+          <tbody>
+            ${stats.days.length === 0 ? `<tr><td colspan="4" class="empty-row">لا يوجد بيانات بعد</td></tr>` :
+              stats.days.slice().reverse().map(d => `
+                <tr>
+                  <td style="font-size:12px;">${dayLabel(d.date)}${d.label ? ` — ${d.label}` : ''}</td>
+                  <td><span class="type-tag ${statusClass[d.status]}">${statusLabel[d.status]}</span></td>
+                  <td class="mono" style="font-size:12px;">${d.ts ? fmtTime(d.ts) : '—'}</td>
+                  <td class="mono" style="font-size:12px;">${d.lateMin ? fmtMinutes(d.lateMin) : '—'}</td>
+                </tr>
+              `).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary-btn" id="print-detail">🖨 طباعة / PDF</button>
+        <button class="primary-btn" id="close-detail">تمام</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.querySelector('#close-detail').onclick = () => backdrop.remove();
+  backdrop.querySelector('#print-detail').onclick = () => printEmployeeReport(emp, monthName, stats, statusLabel);
+}
+
+function printEmployeeReport(emp, monthName, stats, statusLabel){
+  const win = window.open('', '_blank');
+  if(!win){ showToast('المتصفح منع فتح نافذة الطباعة، اسمح بالنوافذ المنبثقة', true); return; }
+  const rowsHtml = stats.days.map(d => `
+    <tr>
+      <td>${dayLabel(d.date)}${d.label ? ` — ${d.label}` : ''}</td>
+      <td>${statusLabel[d.status]}</td>
+      <td>${d.ts ? fmtTime(d.ts) : '—'}</td>
+      <td>${d.lateMin ? fmtMinutes(d.lateMin) : '—'}</td>
+    </tr>`).join('');
+  win.document.write(`
+    <!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8">
+    <title>تقرير ${emp.name} — ${monthName}</title>
+    <style>
+      body{font-family: Tahoma, Arial, sans-serif; padding:30px; color:#1B1F2A;}
+      h1{font-size:20px; margin-bottom:2px;}
+      .sub{color:#6B6455; font-size:13px; margin-bottom:20px;}
+      table{width:100%; border-collapse:collapse; font-size:13px;}
+      th,td{border:1px solid #ddd; padding:8px; text-align:right;}
+      th{background:#f2f2f2;}
+      .summary{display:flex; gap:20px; margin-bottom:20px; flex-wrap:wrap;}
+      .summary div{border:1px solid #ddd; border-radius:8px; padding:10px 16px;}
+      .summary b{display:block; font-size:18px;}
+    </style></head><body>
+    <h1>${settings.companyName || 'ساعة الحضور'} — تقرير حضور</h1>
+    <div class="sub">${emp.name} — شهر ${monthName} — ميعاد الحضور الرسمي: ${emp.startTime || settings.defaultStartTime || '09:00'}</div>
+    <div class="summary">
+      <div>أيام الحضور<b>${stats.presentDays} / ${stats.workDaysCount}</b></div>
+      <div>أيام الغياب<b>${stats.absentDays}</b></div>
+      <div>مرات التأخير<b>${stats.lateCount}</b></div>
+      <div>إجمالي وقت التأخير<b>${fmtMinutes(stats.lateMinutesTotal)}</b></div>
+      <div>الخصم المتوقع<b>${stats.deduction.toFixed(2)} ${settings.currency}</b></div>
+    </div>
+    <table>
+      <thead><tr><th>اليوم</th><th>الحالة</th><th>وقت الحضور</th><th>التأخير</th></tr></thead>
+      <tbody>${rowsHtml || '<tr><td colspan="4">لا يوجد بيانات</td></tr>'}</tbody>
+    </table>
+    <script>window.onload = () => { window.print(); };<\/script>
+    </body></html>
+  `);
+  win.document.close();
+}
+
+/* ============ Change password (self) ============ */
+function openChangePasswordModal(){
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal" style="text-align:right;">
+      <h3 style="text-align:center;">تغيير كلمة المرور</h3>
+      <div class="sub" style="text-align:center;">لحساب ${currentUser.name}</div>
+      <div id="cp-error"></div>
+      <div class="field"><label for="cp-old">كلمة المرور الحالية</label><input id="cp-old" type="password" placeholder="••••••••"></div>
+      <div class="field"><label for="cp-new">كلمة المرور الجديدة</label><input id="cp-new" type="password" placeholder="••••••••"></div>
+      <div class="field"><label for="cp-confirm">تأكيد كلمة المرور الجديدة</label><input id="cp-confirm" type="password" placeholder="••••••••"></div>
+      <div class="modal-actions">
+        <button class="secondary-btn" id="cp-cancel">إلغاء</button>
+        <button class="primary-btn" id="cp-save">حفظ</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.querySelector('#cp-cancel').onclick = () => backdrop.remove();
+  backdrop.querySelector('#cp-save').onclick = async () => {
+    const oldP = document.getElementById('cp-old').value;
+    const newP = document.getElementById('cp-new').value;
+    const confP = document.getElementById('cp-confirm').value;
+    const errBox = document.getElementById('cp-error');
+    if(oldP !== currentUser.password){ errBox.innerHTML = `<div class="error-msg">كلمة المرور الحالية غلط</div>`; return; }
+    if(!newP || newP.length < 4){ errBox.innerHTML = `<div class="error-msg">كلمة المرور الجديدة لازم تكون 4 حروف/أرقام على الأقل</div>`; return; }
+    if(newP !== confP){ errBox.innerHTML = `<div class="error-msg">كلمة المرور الجديدة مش متطابقة مع التأكيد</div>`; return; }
+    try{
+      await usersCol.doc(currentUser.id).update({ password: newP });
+      currentUser.password = newP;
+      backdrop.remove();
+      showToast('تم تغيير كلمة المرور بنجاح');
+    }catch(e){
+      errBox.innerHTML = `<div class="error-msg">حصلت مشكلة أثناء الحفظ</div>`;
+    }
+  };
+}
+
+/* ============ Manager: employee management ============ */
+function openResetEmployeePasswordModal(empId){
+  const emp = users.find(u => u.id === empId);
+  if(!emp) return;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal" style="text-align:right;">
+      <h3 style="text-align:center;">إعادة تعيين كلمة المرور</h3>
+      <div class="sub" style="text-align:center;">لموظف: ${emp.name}</div>
+      <div id="rp-error"></div>
+      <div class="field"><label for="rp-new">كلمة المرور الجديدة</label><input id="rp-new" type="text" placeholder="كلمة مرور جديدة"></div>
+      <div class="modal-actions">
+        <button class="secondary-btn" id="rp-cancel">إلغاء</button>
+        <button class="primary-btn" id="rp-save">حفظ</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.querySelector('#rp-cancel').onclick = () => backdrop.remove();
+  backdrop.querySelector('#rp-save').onclick = async () => {
+    const newP = document.getElementById('rp-new').value;
+    if(!newP || newP.length < 4){
+      document.getElementById('rp-error').innerHTML = `<div class="error-msg">كلمة المرور لازم تكون 4 حروف/أرقام على الأقل</div>`;
+      return;
+    }
+    try{
+      await usersCol.doc(empId).update({ password: newP });
+      backdrop.remove();
+      showToast(`تم تغيير كلمة مرور ${emp.name}`);
+      logAction('إعادة تعيين كلمة مرور', emp.name);
+    }catch(e){
+      backdrop.remove();
+      showToast('حصلت مشكلة أثناء الحفظ', true);
+    }
+  };
+}
+
+function removeEmployee(empId){
+  const emp = users.find(u => u.id === empId);
+  if(!emp) return;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal">
+      <h3>تأكيد الحذف</h3>
+      <div class="sub">متأكد إنك عايز تحذف <b>${emp.name}</b>؟ سجل حضوره القديم هيفضل موجود، بس مش هيقدر يدخل تاني.</div>
+      <div class="modal-actions">
+        <button class="secondary-btn" id="rm-cancel">إلغاء</button>
+        <button class="primary-btn" id="rm-confirm" style="background:var(--danger);">حذف نهائيًا</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.querySelector('#rm-cancel').onclick = () => backdrop.remove();
+  backdrop.querySelector('#rm-confirm').onclick = () => {
+    backdrop.remove();
+    pendingDeleteIds.add(empId);
+    route();
+    const timeoutId = setTimeout(async () => {
+      pendingDeleteIds.delete(empId);
+      try{
+        await usersCol.doc(empId).delete();
+        logAction('حذف موظف', emp.name);
+      }catch(e){ showToast('حصلت مشكلة أثناء الحذف', true); }
+    }, 6000);
+    showUndoToast(`تم حذف ${emp.name}`, () => {
+      clearTimeout(timeoutId);
+      pendingDeleteIds.delete(empId);
+      route();
+    });
+  };
+}
+
+function openAddEmployeeModal(){
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal" style="text-align:right;">
+      <h3 style="text-align:center;">إضافة موظف جديد</h3>
+      <div class="sub" style="text-align:center;">هيتقدر يسجل دخول بالبيانات دي</div>
+      <div id="add-emp-error"></div>
+      <div class="field"><label for="ne-name">الاسم الكامل</label><input id="ne-name" type="text" placeholder="مثال: محمد سيد"></div>
+      <div class="field"><label for="ne-user">اسم المستخدم</label><input id="ne-user" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="مثال: mohamed"></div>
+      <div class="field"><label for="ne-pass">كلمة المرور</label><input id="ne-pass" type="text" placeholder="كلمة مرور مبدئية"></div>
+      <div class="field"><label for="ne-start">ميعاد الحضور الرسمي</label><input id="ne-start" type="time" value="${settings.defaultStartTime || '09:00'}"></div>
+      <div class="field">
+        <label for="ne-dept">القسم</label>
+        <select id="ne-dept">
+          <option value="">بدون قسم</option>
+          ${departments.map(d => `<option value="${d.id}">${d.name}</option>`).join('')}
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary-btn" id="cancel-add">إلغاء</button>
+        <button class="primary-btn" id="save-add">حفظ الموظف</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.querySelector('#cancel-add').onclick = () => backdrop.remove();
+  backdrop.querySelector('#save-add').onclick = async () => {
+    const name = document.getElementById('ne-name').value.trim();
+    const username = document.getElementById('ne-user').value.trim();
+    const password = document.getElementById('ne-pass').value;
+    const startTime = document.getElementById('ne-start').value || settings.defaultStartTime || '09:00';
+    const departmentId = document.getElementById('ne-dept').value;
+    const errBox = document.getElementById('add-emp-error');
+    if(!name || !username || !password){ errBox.innerHTML = `<div class="error-msg">من فضلك املأ كل الحقول</div>`; return; }
+    if(users.some(u => u.username.toLowerCase() === username.toLowerCase())){
+      errBox.innerHTML = `<div class="error-msg">اسم المستخدم ده مستخدم بالفعل</div>`; return;
+    }
+    try{
+      await usersCol.add({ username, password, name, role:'employee', startTime, departmentId });
+      backdrop.remove();
+      showToast(`تمت إضافة ${name}`);
+      logAction('إضافة موظف', name);
+    }catch(e){
+      errBox.innerHTML = `<div class="error-msg">حصلت مشكلة أثناء الحفظ</div>`;
+    }
+  };
+}
+
+/* ============ Manager: edit employee data (start time + department) ============ */
+function openEditEmployeeModal(empId){
+  const emp = users.find(u => u.id === empId);
+  if(!emp) return;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal" style="text-align:right;">
+      <h3 style="text-align:center;">بيانات الموظف</h3>
+      <div class="sub" style="text-align:center;">${emp.name}</div>
+      <div id="es-error"></div>
+      <div class="field"><label for="es-time">ميعاد الحضور الرسمي</label><input id="es-time" type="time" value="${emp.startTime || settings.defaultStartTime || '09:00'}"></div>
+      <div class="field">
+        <label for="es-dept">القسم</label>
+        <select id="es-dept">
+          <option value="">بدون قسم</option>
+          ${departments.map(d => `<option value="${d.id}" ${emp.departmentId === d.id ? 'selected' : ''}>${d.name}</option>`).join('')}
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary-btn" id="es-cancel">إلغاء</button>
+        <button class="primary-btn" id="es-save">حفظ</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.querySelector('#es-cancel').onclick = () => backdrop.remove();
+  backdrop.querySelector('#es-save').onclick = async () => {
+    const newTime = document.getElementById('es-time').value;
+    const newDept = document.getElementById('es-dept').value;
+    if(!newTime){ document.getElementById('es-error').innerHTML = `<div class="error-msg">اختار ميعاد صحيح</div>`; return; }
+    try{
+      await usersCol.doc(empId).update({ startTime: newTime, departmentId: newDept });
+      backdrop.remove();
+      showToast(`تم تحديث بيانات ${emp.name}`);
+      logAction('تعديل بيانات موظف', `${emp.name} — ميعاد: ${newTime}`);
+    }catch(e){
+      backdrop.remove();
+      showToast('حصلت مشكلة أثناء الحفظ', true);
+    }
+  };
+}
+
+/* ============ Manager: manual attendance entry (retroactive fix) ============ */
+function openManualEntryModal(employees){
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  const todayStr = new Date().toISOString().slice(0,10);
+  backdrop.innerHTML = `
+    <div class="modal" style="text-align:right;">
+      <h3 style="text-align:center;">تسجيل حضور/انصراف يدوي</h3>
+      <div class="sub" style="text-align:center;">لو موظف نسي يسجل، تقدر تضيف تسجيل ليوم واحد أو لعدة أيام مرة واحدة</div>
+      <div id="me-error"></div>
+      <div class="field">
+        <label for="me-emp">الموظف</label>
+        <select id="me-emp">
+          ${employees.map(e => `<option value="${e.id}">${e.name}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label for="me-type">النوع</label>
+        <select id="me-type">
+          <option value="in">حضور</option>
+          <option value="out">انصراف</option>
+        </select>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+        <div class="field"><label for="me-date-from">من يوم</label><input id="me-date-from" type="date" value="${todayStr}"></div>
+        <div class="field"><label for="me-date-to">لغاية يوم</label><input id="me-date-to" type="date" value="${todayStr}"></div>
+      </div>
+      <div class="field"><label for="me-time">الوقت (نفسه لكل الأيام)</label><input id="me-time" type="time" value="09:00"></div>
+      <label style="display:flex; align-items:center; gap:8px; font-size:13px; background:#fff; padding:10px 14px; border-radius:8px; border:1.5px solid var(--panel-line); margin-bottom:16px;">
+        <input type="checkbox" id="me-workdays-only" checked>
+        سجّل في أيام الشغل الرسمية بس (استبعد الإجازات وأيام العطلة)
+      </label>
+      <div id="me-preview" class="sub" style="margin-bottom:10px;"></div>
+      <div class="modal-actions">
+        <button class="secondary-btn" id="me-cancel">إلغاء</button>
+        <button class="primary-btn" id="me-save">حفظ التسجيلات</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+
+  const updatePreview = () => {
+    const fromVal = document.getElementById('me-date-from').value;
+    const toVal = document.getElementById('me-date-to').value;
+    const workOnly = document.getElementById('me-workdays-only').checked;
+    const preview = document.getElementById('me-preview');
+    if(!fromVal || !toVal || toVal < fromVal){ preview.textContent = ''; return; }
+    const dates = getDateRange(fromVal, toVal, workOnly);
+    preview.textContent = `هيتم إضافة ${dates.length} تسجيل${dates.length === 1 ? '' : 'ات'}.`;
+  };
+  document.getElementById('me-date-from').onchange = updatePreview;
+  document.getElementById('me-date-to').onchange = updatePreview;
+  document.getElementById('me-workdays-only').onchange = updatePreview;
+  updatePreview();
+
+  backdrop.querySelector('#me-cancel').onclick = () => backdrop.remove();
+  backdrop.querySelector('#me-save').onclick = async () => {
+    const empId = document.getElementById('me-emp').value;
+    const type = document.getElementById('me-type').value;
+    const fromVal = document.getElementById('me-date-from').value;
+    const toVal = document.getElementById('me-date-to').value;
+    const timeVal = document.getElementById('me-time').value;
+    const workOnly = document.getElementById('me-workdays-only').checked;
+    const errBox = document.getElementById('me-error');
+    if(!empId || !fromVal || !toVal || !timeVal){ errBox.innerHTML = `<div class="error-msg">من فضلك املأ كل الحقول</div>`; return; }
+    if(toVal < fromVal){ errBox.innerHTML = `<div class="error-msg">تاريخ النهاية لازم يكون بعد تاريخ البداية</div>`; return; }
+    const dates = getDateRange(fromVal, toVal, workOnly);
+    if(dates.length === 0){ errBox.innerHTML = `<div class="error-msg">مفيش أيام شغل في المدى ده</div>`; return; }
+    if(dates.length > 300){ errBox.innerHTML = `<div class="error-msg">المدى كبير أوي (${dates.length} يوم). قسّمه لفترات أصغر من فضلك</div>`; return; }
+    const emp = users.find(u => u.id === empId);
+    const [hh,mm] = timeVal.split(':').map(Number);
+    try{
+      const batch = db.batch();
+      dates.forEach(date => {
+        const ts = new Date(date.getFullYear(), date.getMonth(), date.getDate(), hh, mm).getTime();
+        const ref = attendanceCol.doc();
+        batch.set(ref, { userId: empId, name: emp.name, username: emp.username, type, ts, lat: null, lng: null, manual: true, enteredBy: currentUser.name });
+      });
+      await batch.commit();
+      backdrop.remove();
+      showToast(`تم تسجيل ${dates.length} ${type === 'in' ? 'حضور' : 'انصراف'} لـ${emp.name} يدويًا`);
+      logAction('تسجيل يدوي متعدد الأيام', `${emp.name} — ${type === 'in' ? 'حضور' : 'انصراف'} — من ${fromVal} إلى ${toVal} (${dates.length} يوم)`);
+    }catch(e){
+      errBox.innerHTML = `<div class="error-msg">حصلت مشكلة أثناء الحفظ</div>`;
+    }
+  };
+}
+
+/* ============ Leave requests ============ */
+function renderLeaveList(isManager){
+  const box = document.getElementById('leave-mgr-list');
+  if(!box) return;
+  let list = leaveRequests.slice();
+  if(currentUser.role === 'employee') list = list.filter(l => l.userId === currentUser.id);
+  list.sort((a,b)=> b.requestedAt - a.requestedAt);
+  if(list.length === 0){ box.innerHTML = `<div class="empty-row">مفيش طلبات إجازة لسه</div>`; return; }
+  const statusLabel = { pending:'قيد المراجعة', approved:'مقبولة', rejected:'مرفوضة' };
+  const statusClass = { pending:'out', approved:'in', rejected:'out' };
+  box.innerHTML = `
+    <table>
+      <thead><tr><th>الموظف</th><th>النوع</th><th>من</th><th>إلى</th><th>السبب</th><th>الحالة</th><th>إجراءات</th></tr></thead>
+      <tbody>
+        ${list.map(l => {
+          const canCancelOwn = !isManager && currentUser.role === 'employee' && l.userId === currentUser.id && l.status === 'pending';
+          return `
+          <tr>
+            <td>${l.name}</td>
+            <td>${l.type}</td>
+            <td class="mono" style="font-size:12px;">${l.fromDate}</td>
+            <td class="mono" style="font-size:12px;">${l.toDate}</td>
+            <td style="font-size:12px; max-width:160px;">${l.reason || '—'}</td>
+            <td><span class="type-tag ${statusClass[l.status]}">${statusLabel[l.status]}</span></td>
+            <td style="white-space:nowrap;">
+              ${isManager && l.status === 'pending' ? `
+                <button class="secondary-btn" style="padding:6px 10px; font-size:12px; width:auto;" data-approve="${l.id}">موافقة</button>
+                <button class="secondary-btn" style="padding:6px 10px; font-size:12px; width:auto; color:var(--danger); border-color:rgba(196,69,59,0.4) !important;" data-reject="${l.id}">رفض</button>
+              ` : ''}
+              ${isManager || canCancelOwn ? `
+                <button class="secondary-btn" style="padding:6px 10px; font-size:12px; width:auto; color:var(--danger); border-color:rgba(196,69,59,0.4) !important;" data-del-leave="${l.id}">حذف</button>
+              ` : ''}
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  `;
+  box.querySelectorAll('[data-del-leave]').forEach(btn => {
+    btn.onclick = () => deleteLeave(btn.getAttribute('data-del-leave'), isManager);
+  });
+  if(isManager){
+    box.querySelectorAll('[data-approve]').forEach(btn => {
+      btn.onclick = () => decideLeave(btn.getAttribute('data-approve'), 'approved');
+    });
+    box.querySelectorAll('[data-reject]').forEach(btn => {
+      btn.onclick = () => decideLeave(btn.getAttribute('data-reject'), 'rejected');
+    });
+  }
+}
+async function decideLeave(leaveId, status){
+  const l = leaveRequests.find(x => x.id === leaveId);
+  try{
+    await leaveCol.doc(leaveId).update({ status });
+    showToast(status === 'approved' ? 'تمت الموافقة على الإجازة' : 'تم رفض الإجازة');
+    if(l) logAction(status === 'approved' ? 'موافقة على إجازة' : 'رفض إجازة', `${l.name} (${l.fromDate} - ${l.toDate})`);
+  }catch(e){
+    showToast('حصلت مشكلة أثناء التحديث', true);
+  }
+}
+async function deleteLeave(leaveId, isManager){
+  const l = leaveRequests.find(x => x.id === leaveId);
+  try{
+    await leaveCol.doc(leaveId).delete();
+    showToast('تم حذف طلب الإجازة');
+    if(isManager && l) logAction('حذف طلب إجازة', `${l.name} (${l.fromDate} - ${l.toDate})`);
+  }catch(e){
+    showToast('حصلت مشكلة أثناء الحذف', true);
+  }
+}
+function openLeaveRequestModal(){
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal" style="text-align:right;">
+      <h3 style="text-align:center;">طلب إجازة جديدة</h3>
+      <div id="lv-error"></div>
+      <div class="field">
+        <label for="lv-type">نوع الإجازة</label>
+        <select id="lv-type">
+          <option value="سنوية">سنوية</option>
+          <option value="مرضية">مرضية</option>
+          <option value="عارضة">عارضة</option>
+        </select>
+      </div>
+      <div class="field"><label for="lv-from">من يوم</label><input id="lv-from" type="date"></div>
+      <div class="field"><label for="lv-to">لغاية يوم</label><input id="lv-to" type="date"></div>
+      <div class="field"><label for="lv-reason">السبب (اختياري)</label><input id="lv-reason" type="text" placeholder="سبب الإجازة"></div>
+      <div class="modal-actions">
+        <button class="secondary-btn" id="lv-cancel">إلغاء</button>
+        <button class="primary-btn" id="lv-save">إرسال الطلب</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.querySelector('#lv-cancel').onclick = () => backdrop.remove();
+  backdrop.querySelector('#lv-save').onclick = async () => {
+    const type = document.getElementById('lv-type').value;
+    const fromDate = document.getElementById('lv-from').value;
+    const toDate = document.getElementById('lv-to').value;
+    const reason = document.getElementById('lv-reason').value.trim();
+    const errBox = document.getElementById('lv-error');
+    if(!fromDate || !toDate){ errBox.innerHTML = `<div class="error-msg">اختار تاريخ البداية والنهاية</div>`; return; }
+    if(toDate < fromDate){ errBox.innerHTML = `<div class="error-msg">تاريخ النهاية لازم يكون بعد تاريخ البداية</div>`; return; }
+    try{
+      await leaveCol.add({ userId: currentUser.id, name: currentUser.name, type, fromDate, toDate, reason, status:'pending', requestedAt: Date.now() });
+      backdrop.remove();
+      showToast('تم إرسال طلب الإجازة');
+    }catch(e){
+      errBox.innerHTML = `<div class="error-msg">حصلت مشكلة أثناء الإرسال</div>`;
+    }
+  };
+}
+
+/* ============ Audit log ============ */
+function renderAuditList(){
+  const box = document.getElementById('audit-list');
+  if(!box) return;
+  const list = auditLog.slice().sort((a,b)=> b.ts - a.ts).slice(0, 30);
+  if(list.length === 0){ box.innerHTML = `<div class="empty-row">مفيش عمليات مسجلة لسه</div>`; return; }
+  box.innerHTML = `
+    <table>
+      <thead><tr><th>الوقت</th><th>بواسطة</th><th>العملية</th><th>التفاصيل</th></tr></thead>
+      <tbody>
+        ${list.map(a => `
+          <tr>
+            <td class="mono" style="font-size:12px;">${fmtDate(a.ts)} ${fmtTime(a.ts)}</td>
+            <td>${a.actorName}</td>
+            <td>${a.action}</td>
+            <td style="font-size:12px; color:var(--text-mute);">${a.details || '—'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+/* ============ Settings page (manager only) ============ */
+const WEEKDAYS_AR = [ {v:6,l:'السبت'}, {v:0,l:'الأحد'}, {v:1,l:'الاثنين'}, {v:2,l:'الثلاثاء'}, {v:3,l:'الأربعاء'}, {v:4,l:'الخميس'}, {v:5,l:'الجمعة'} ];
+function renderSettingsPage(){
+  currentView = 'settings';
+  const app = document.getElementById('app');
+  const wd = settings.workDays || [0,1,2,3,4,6];
+  const supervisors = users.filter(u => u.role === 'supervisor');
+
+  app.innerHTML = `
+    <div class="dash">
+      <div class="panel">
+        <div class="row-between" style="margin-bottom:16px;">
+          <h2>الإعدادات العامة</h2>
+          <button class="secondary-btn" id="back-to-dash" style="width:auto; padding:10px 18px;">→ رجوع للداشبورد</button>
+        </div>
+
+        <h3 style="font-size:15px; margin-bottom:10px;">أيام العمل الرسمية</h3>
+        <div style="display:flex; flex-wrap:wrap; gap:14px; margin-bottom:22px;">
+          ${WEEKDAYS_AR.map(d => `
+            <label style="display:flex; align-items:center; gap:6px; font-size:13px; background:#fff; padding:8px 12px; border-radius:8px; border:1.5px solid var(--panel-line);">
+              <input type="checkbox" data-wd="${d.v}" ${wd.includes(d.v) ? 'checked' : ''}> ${d.l}
+            </label>
+          `).join('')}
+        </div>
+
+        <h3 style="font-size:15px; margin-bottom:10px;">الخصومات والميعاد الافتراضي</h3>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin-bottom:10px;">
+          <div class="field"><label for="set-currency">وحدة العملة</label><input id="set-currency" type="text" value="${settings.currency || 'جنيه'}"></div>
+          <div class="field"><label for="set-perday">خصم يوم الغياب</label><input id="set-perday" type="number" min="0" step="0.5" value="${settings.deductionPerDay || 0}"></div>
+          <div class="field"><label for="set-permin">خصم دقيقة التأخير</label><input id="set-permin" type="number" min="0" step="0.1" value="${settings.deductionPerLateMinute || 0}"></div>
+          <div class="field"><label for="set-defstart">الميعاد الافتراضي لموظف جديد</label><input id="set-defstart" type="time" value="${settings.defaultStartTime || '09:00'}"></div>
+          <div class="field"><label for="set-company">اسم الشركة (يظهر فوق)</label><input id="set-company" type="text" value="${settings.companyName || ''}" placeholder="ساعة الحضور"></div>
+          <div class="field"><label for="set-logo">رابط شعار الشركة (اختياري)</label><input id="set-logo" type="text" value="${settings.logoUrl || ''}" placeholder="https://..."></div>
+        </div>
+        <label style="display:flex; align-items:center; gap:8px; font-size:13px; background:#fff; padding:10px 14px; border-radius:8px; border:1.5px solid var(--panel-line); width:fit-content; margin-bottom:16px;">
+          <input type="checkbox" id="set-kiosk" ${settings.kioskMode ? 'checked' : ''}>
+          وضع الجهاز المشترك (Kiosk) — بعد أي تسجيل حضور/انصراف يرجع لشاشة الدخول تلقائيًا
+        </label>
+        <button class="primary-btn" id="save-settings-btn" style="width:auto; padding:12px 24px;">حفظ الإعدادات</button>
+      </div>
+
+      <div class="panel">
+        <h2 style="margin-bottom:2px;">العطلات الرسمية</h2>
+        <div class="sub">أي يوم هنا مش هيتحسب غياب ولا يوم شغل</div>
+        <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap; align-items:flex-end;">
+          <div class="field" style="margin:0;"><label for="hol-date">التاريخ</label><input id="hol-date" type="date"></div>
+          <div class="field" style="margin:0; flex:1; min-width:160px;"><label for="hol-name">اسم المناسبة</label><input id="hol-name" type="text" placeholder="مثال: عيد الفطر"></div>
+          <button class="primary-btn" id="add-holiday-btn" style="width:auto; padding:11px 20px;">إضافة</button>
+        </div>
+        <table>
+          <thead><tr><th>التاريخ</th><th>المناسبة</th><th></th></tr></thead>
+          <tbody>
+            ${holidays.length === 0 ? `<tr><td colspan="3" class="empty-row">مفيش عطلات مضافة</td></tr>` :
+              holidays.slice().sort((a,b)=> a.date.localeCompare(b.date)).map(h => `
+                <tr>
+                  <td class="mono">${h.date}</td>
+                  <td>${h.name}</td>
+                  <td><button class="secondary-btn" style="padding:5px 10px; font-size:12px; width:auto; color:var(--danger); border-color:rgba(196,69,59,0.4) !important;" data-del-hol="${h.id}">حذف</button></td>
+                </tr>
+              `).join('')}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="panel">
+        <h2 style="margin-bottom:2px;">الأقسام</h2>
+        <div class="sub">نظّم الموظفين في أقسام لتصفية التقارير</div>
+        <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap; align-items:flex-end;">
+          <div class="field" style="margin:0; flex:1; min-width:160px;"><label for="dept-name">اسم القسم</label><input id="dept-name" type="text" placeholder="مثال: المبيعات"></div>
+          <button class="primary-btn" id="add-dept-btn" style="width:auto; padding:11px 20px;">إضافة</button>
+        </div>
+        <table>
+          <thead><tr><th>القسم</th><th></th></tr></thead>
+          <tbody>
+            ${departments.length === 0 ? `<tr><td colspan="2" class="empty-row">مفيش أقسام مضافة</td></tr>` :
+              departments.map(d => `
+                <tr>
+                  <td>${d.name}</td>
+                  <td><button class="secondary-btn" style="padding:5px 10px; font-size:12px; width:auto; color:var(--danger); border-color:rgba(196,69,59,0.4) !important;" data-del-dept="${d.id}">حذف</button></td>
+                </tr>
+              `).join('')}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="panel">
+        <div class="row-between" style="margin-bottom:6px;">
+          <div>
+            <h2 style="margin-bottom:2px;">دعوات الانضمام</h2>
+            <div class="sub" style="margin-bottom:0;">محدش يقدر يعمل حساب من "إنشاء حساب" غير بكود دعوة صادر منك</div>
+          </div>
+          <button class="add-emp-btn" id="create-invite-btn" style="width:auto;">+ إنشاء كود دعوة</button>
+        </div>
+        <table>
+          <thead><tr><th>الكود</th><th>الحالة</th><th>استخدمه</th><th></th></tr></thead>
+          <tbody>
+            ${invites.length === 0 ? `<tr><td colspan="4" class="empty-row">مفيش دعوات لسه</td></tr>` :
+              invites.slice().sort((a,b)=> b.createdAt - a.createdAt).map(i => `
+                <tr>
+                  <td class="mono" style="font-size:15px; font-weight:700;">${i.code}</td>
+                  <td><span class="type-tag ${i.used ? 'out' : 'in'}">${i.used ? 'مستخدم' : 'متاح'}</span></td>
+                  <td>${i.used ? (i.usedBy || '—') : '—'}</td>
+                  <td>${!i.used ? `<button class="secondary-btn" style="padding:5px 10px; font-size:12px; width:auto; color:var(--danger); border-color:rgba(196,69,59,0.4) !important;" data-del-invite="${i.id}">حذف</button>` : ''}</td>
+                </tr>
+              `).join('')}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="panel">
+        <h2 style="margin-bottom:2px;">حسابات المشرفين</h2>
+        <div class="sub">مشرف يقدر يشوف كل الداشبورد والتقارير، بس مش يقدر يعدّل أي حاجة (عرض فقط)</div>
+        <div id="add-sup-error"></div>
+        <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap; align-items:flex-end;">
+          <div class="field" style="margin:0;"><label for="sup-name">الاسم</label><input id="sup-name" type="text" placeholder="اسم المشرف"></div>
+          <div class="field" style="margin:0;"><label for="sup-user">اسم المستخدم</label><input id="sup-user" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="username"></div>
+          <div class="field" style="margin:0;"><label for="sup-pass">كلمة المرور</label><input id="sup-pass" type="text" placeholder="password"></div>
+          <button class="primary-btn" id="add-sup-btn" style="width:auto; padding:11px 20px;">إضافة مشرف</button>
+        </div>
+        <table>
+          <thead><tr><th>الاسم</th><th>اسم المستخدم</th><th></th></tr></thead>
+          <tbody>
+            ${supervisors.length === 0 ? `<tr><td colspan="3" class="empty-row">مفيش مشرفين مضافين</td></tr>` :
+              supervisors.map(s => `
+                <tr>
+                  <td>${s.name}</td>
+                  <td class="mono">${s.username}</td>
+                  <td><button class="secondary-btn" style="padding:5px 10px; font-size:12px; width:auto; color:var(--danger); border-color:rgba(196,69,59,0.4) !important;" data-del-sup="${s.id}">حذف</button></td>
+                </tr>
+              `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('back-to-dash').onclick = () => { currentView = 'dashboard'; route(); };
+
+  document.getElementById('save-settings-btn').onclick = async () => {
+    const checked = Array.from(app.querySelectorAll('[data-wd]')).filter(c => c.checked).map(c => Number(c.getAttribute('data-wd')));
+    if(checked.length === 0){ showToast('لازم يوم شغل واحد على الأقل', true); return; }
+    const newSettings = {
+      workDays: checked,
+      currency: document.getElementById('set-currency').value.trim() || 'جنيه',
+      deductionPerDay: Number(document.getElementById('set-perday').value) || 0,
+      deductionPerLateMinute: Number(document.getElementById('set-permin').value) || 0,
+      defaultStartTime: document.getElementById('set-defstart').value || '09:00',
+      companyName: document.getElementById('set-company').value.trim(),
+      logoUrl: document.getElementById('set-logo').value.trim(),
+      kioskMode: document.getElementById('set-kiosk').checked
+    };
+    try{
+      await settingsCol.doc('general').set(newSettings, {merge:true});
+      showToast('تم حفظ الإعدادات');
+      logAction('تعديل الإعدادات العامة', '');
+    }catch(e){
+      showToast('حصلت مشكلة أثناء الحفظ', true);
+    }
+  };
+
+  document.getElementById('add-holiday-btn').onclick = async () => {
+    const date = document.getElementById('hol-date').value;
+    const name = document.getElementById('hol-name').value.trim();
+    if(!date || !name){ showToast('اكتب التاريخ والاسم', true); return; }
+    try{
+      await holidaysCol.add({ date, name });
+      showToast('تمت إضافة العطلة');
+      logAction('إضافة عطلة رسمية', `${name} (${date})`);
+    }catch(e){ showToast('حصلت مشكلة أثناء الحفظ', true); }
+  };
+  app.querySelectorAll('[data-del-hol]').forEach(btn => {
+    btn.onclick = async () => {
+      try{ await holidaysCol.doc(btn.getAttribute('data-del-hol')).delete(); showToast('تم حذف العطلة'); }
+      catch(e){ showToast('حصلت مشكلة أثناء الحذف', true); }
+    };
+  });
+
+  document.getElementById('add-dept-btn').onclick = async () => {
+    const name = document.getElementById('dept-name').value.trim();
+    if(!name){ showToast('اكتب اسم القسم', true); return; }
+    try{
+      await departmentsCol.add({ name });
+      showToast('تمت إضافة القسم');
+      logAction('إضافة قسم', name);
+    }catch(e){ showToast('حصلت مشكلة أثناء الحفظ', true); }
+  };
+  app.querySelectorAll('[data-del-dept]').forEach(btn => {
+    btn.onclick = async () => {
+      try{ await departmentsCol.doc(btn.getAttribute('data-del-dept')).delete(); showToast('تم حذف القسم'); }
+      catch(e){ showToast('حصلت مشكلة أثناء الحذف', true); }
+    };
+  });
+
+  document.getElementById('add-sup-btn').onclick = async () => {
+    const name = document.getElementById('sup-name').value.trim();
+    const username = document.getElementById('sup-user').value.trim();
+    const password = document.getElementById('sup-pass').value;
+    const errBox = document.getElementById('add-sup-error');
+    if(!name || !username || !password){ errBox.innerHTML = `<div class="error-msg">من فضلك املأ كل الحقول</div>`; return; }
+    if(users.some(u => u.username.toLowerCase() === username.toLowerCase())){
+      errBox.innerHTML = `<div class="error-msg">اسم المستخدم ده مستخدم بالفعل</div>`; return;
+    }
+    try{
+      await usersCol.add({ username, password, name, role:'supervisor' });
+      showToast(`تمت إضافة المشرف ${name}`);
+      logAction('إضافة مشرف', name);
+    }catch(e){ errBox.innerHTML = `<div class="error-msg">حصلت مشكلة أثناء الحفظ</div>`; }
+  };
+  app.querySelectorAll('[data-del-sup]').forEach(btn => {
+    btn.onclick = async () => {
+      try{ await usersCol.doc(btn.getAttribute('data-del-sup')).delete(); showToast('تم حذف المشرف'); }
+      catch(e){ showToast('حصلت مشكلة أثناء الحذف', true); }
+    };
+  });
+
+  document.getElementById('create-invite-btn').onclick = async () => {
+    const code = Array.from({length:6}, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random()*33)]).join('');
+    try{
+      await invitesCol.add({ code, createdBy: currentUser.name, createdAt: Date.now(), used:false });
+      showToast(`تم إنشاء الكود: ${code}`);
+      logAction('إنشاء كود دعوة', code);
+    }catch(e){ showToast('حصلت مشكلة أثناء الحفظ', true); }
+  };
+  app.querySelectorAll('[data-del-invite]').forEach(btn => {
+    btn.onclick = async () => {
+      try{ await invitesCol.doc(btn.getAttribute('data-del-invite')).delete(); showToast('تم حذف الكود'); }
+      catch(e){ showToast('حصلت مشكلة أثناء الحذف', true); }
+    };
+  });
+}
+
+/* ============ Boot: seed + live sync ============ */
+async function seedIfEmpty(){
+  try{
+    const snap = await usersCol.limit(1).get();
+    if(snap.empty){
+      const batch = db.batch();
+      batch.set(usersCol.doc(), {username:'manager', password:'admin123', name:'المدير العام', role:'manager'});
+      batch.set(usersCol.doc(), {username:'ahmed', password:'123456', name:'أحمد محمود', role:'employee'});
+      batch.set(usersCol.doc(), {username:'sara', password:'123456', name:'سارة علي', role:'employee'});
+      await batch.commit();
+    }
+  }catch(e){
+    bootError = true;
+  }
+}
+
+function startLiveSync(){
+  usersCol.onSnapshot(
+    snap => { users = snap.docs.map(d => ({id:d.id, ...d.data()})); route(); },
+    err => { showToast('في مشكلة في الاتصال بقاعدة البيانات', true); }
+  );
+  attendanceCol.onSnapshot(
+    snap => { attendance = snap.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b)=>b.ts-a.ts); route(); },
+    err => {}
+  );
+  settingsCol.doc('general').onSnapshot(
+    snap => { if(snap.exists) settings = { ...settings, ...snap.data() }; route(); },
+    err => {}
+  );
+  holidaysCol.onSnapshot(
+    snap => { holidays = snap.docs.map(d => ({id:d.id, ...d.data()})); route(); },
+    err => {}
+  );
+  departmentsCol.onSnapshot(
+    snap => { departments = snap.docs.map(d => ({id:d.id, ...d.data()})); route(); },
+    err => {}
+  );
+  leaveCol.onSnapshot(
+    snap => { leaveRequests = snap.docs.map(d => ({id:d.id, ...d.data()})); route(); },
+    err => {}
+  );
+  auditCol.onSnapshot(
+    snap => { auditLog = snap.docs.map(d => ({id:d.id, ...d.data()})); route(); },
+    err => {}
+  );
+  invitesCol.onSnapshot(
+    snap => { invites = snap.docs.map(d => ({id:d.id, ...d.data()})); route(); },
+    err => {}
+  );
+}
+
+(async function init(){
+  renderTopbarRight();
+  document.getElementById('app').innerHTML = `<div class="boot-msg">جاري تحميل بيانات الشركة...</div>`;
+  await seedIfEmpty();
+  if(bootError){
+    document.getElementById('app').innerHTML = `<div class="boot-msg">تعذر الاتصال بقاعدة البيانات.<br>راجع إعدادات Firebase (الاتصال بالإنترنت / قواعد الحماية).</div>`;
+    return;
+  }
+  startLiveSync();
+})();
+</script>
+</body>
+</html>
