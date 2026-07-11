@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ساعة الحضور</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<style>
+  :root{
+    --bg-deep:#10182B;
+    --bg-deep-2:#182541;
+    --panel:#F6F3EC;
+    --panel-line:#E4DECD;
+    --ink:#B23A2E;
+    --ink-dark:#8C2C22;
+    --teal:#2F9C6E;
+    --teal-dark:#227853;
+    --gold:#D9A62B;
+    --text-dark:#1B1F2A;
+    --text-mute:#6B6455;
+    --text-light:#F6F3EC;
+    --danger:#C4453B;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:radial-gradient(circle at 20% 0%, var(--bg-deep-2), var(--bg-deep) 60%);
+    color:var(--text-dark);
+    font-family:'IBM Plex Sans Arabic', sans-serif;
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+  }
+  h1,h2,h3,.display{
+    font-family:'Cairo', sans-serif;
+    font-weight:800;
+    margin:0;
+  }
+  .mono{font-family:'IBM Plex Mono', monospace; letter-spacing:0.5px;}
+  a{color:inherit;}
+  button{font-family:inherit; cursor:pointer; border:none;}
+  button:focus-visible, input:focus-visible, select:focus-visible{
+    outline:3px solid var(--gold); outline-offset:2px;
+  }
+  ::selection{background:var(--gold); color:var(--text-dark);}
+
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:16px 28px; color:var(--text-light);
+    border-bottom:1px solid rgba(246,243,236,0.08);
+  }
+  .brand{display:flex; align-items:center; gap:12px;}
+  .brand-mark{
+    width:38px;height:38px;border-radius:10px;
+    background:linear-gradient(145deg, var(--gold), var(--ink));
+    display:flex;align-items:center;justify-content:center;
+    font-family:'Cairo',sans-serif; font-weight:800; color:var(--bg-deep); font-size:18px;
+    flex-shrink:0;
+  }
+  .brand-name{font-size:19px;}
+  .brand-sub{font-size:12px; color:rgba(246,243,236,0.55); margin-top:1px;}
+  .clock{font-size:15px; color:var(--gold); display:flex; gap:10px; align-items:baseline;}
+  .clock .date{color:rgba(246,243,236,0.6); font-size:12px;}
+  .who{display:flex; align-items:center; gap:14px;}
+  .who-name{font-size:14px; text-align:left;}
+  .who-role{font-size:11px; color:rgba(246,243,236,0.55);}
+  .logout-btn{
+    background:transparent; color:rgba(246,243,236,0.75);
+    border:1px solid rgba(246,243,236,0.25) !important;
+    padding:7px 14px; border-radius:999px; font-size:13px; transition:all .15s ease;
+  }
+  .logout-btn:hover{background:rgba(246,243,236,0.1); color:var(--text-light);}
+
+  main{flex:1; display:flex; flex-direction:column; align-items:center; padding:32px 20px 60px;}
+
+  .login-wrap{margin:auto; display:flex; flex-direction:column; align-items:center; gap:28px; width:100%;}
+  .punch-hero{display:flex; flex-direction:column; align-items:center; gap:8px; color:var(--text-light); text-align:center;}
+  .punch-hero .brand-mark{width:56px;height:56px;font-size:26px;border-radius:14px;}
+  .punch-hero h1{font-size:28px;}
+  .punch-hero p{margin:0; color:rgba(246,243,236,0.6); font-size:14px;}
+
+  .login-card{
+    background:var(--panel); border-radius:var(--radius); padding:30px 28px;
+    width:100%; max-width:360px; box-shadow:0 25px 60px -20px rgba(0,0,0,0.6);
+    border:1px solid var(--panel-line); position:relative; overflow:hidden;
+  }
+  .login-card::before{
+    content:""; position:absolute; inset:0 0 auto 0; height:6px;
+    background:repeating-linear-gradient(90deg, var(--ink) 0 14px, transparent 14px 24px);
+    opacity:0.5;
+  }
+  .field{margin-bottom:16px;}
+  .field label{display:block; font-size:12px; color:var(--text-mute); margin-bottom:6px; font-weight:600;}
+  .field input, .field select{
+    width:100%; padding:11px 13px; border-radius:9px; border:1.5px solid var(--panel-line);
+    background:#fff; font-size:14px; font-family:inherit; color:var(--text-dark);
+  }
+  .field input:focus, .field select:focus{border-color:var(--ink);}
+  .primary-btn{
+    width:100%; padding:13px; border-radius:9px; background:var(--ink); color:#fff;
+    font-weight:600; font-size:15px; transition:background .15s ease, transform .1s ease;
+  }
+  .primary-btn:hover{background:var(--ink-dark);}
+  .primary-btn:active{transform:scale(0.98);}
+  .primary-btn:disabled{opacity:0.55; cursor:not-allowed;}
+  .ghost-btn{background:transparent; color:var(--text-mute); font-size:13px; padding:8px; text-decoration:underline;}
+  .error-msg{
+    background:rgba(196,69,59,0.1); color:var(--danger); border:1px solid rgba(196,69,59,0.3);
+    padding:9px 12px; border-radius:8px; font-size:13px; margin-bottom:14px;
+  }
+
+  .dash{width:100%; max-width:1000px; display:flex; flex-direction:column; gap:22px;}
+  .panel{background:var(--panel); border-radius:var(--radius); padding:24px; border:1px solid rgba(255,255,255,0.06);}
+  .panel h2{font-size:18px; margin-bottom:4px;}
+  .panel .sub{color:var(--text-mute); font-size:13px; margin-bottom:18px;}
+
+  .punchcard{
+    background:#fff; border-radius:12px; border:1.5px dashed var(--panel-line);
+    padding:26px; display:flex; flex-direction:column; align-items:center; gap:16px;
+    position:relative; text-align:center;
+  }
+  .status-pill{display:inline-flex; align-items:center; gap:7px; padding:6px 14px; border-radius:999px; font-size:13px; font-weight:600;}
+  .status-pill.in{background:rgba(47,156,110,0.12); color:var(--teal-dark);}
+  .status-pill.out{background:rgba(178,58,46,0.1); color:var(--ink);}
+  .status-dot{width:8px;height:8px;border-radius:50%;}
+  .status-pill.in .status-dot{background:var(--teal);}
+  .status-pill.out .status-dot{background:var(--ink);}
+
+  .punch-btn{
+    width:170px; height:170px; border-radius:50%;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;
+    font-family:'Cairo',sans-serif; font-weight:800; font-size:19px; color:#fff;
+    box-shadow:0 14px 30px -10px rgba(0,0,0,0.35); transition:transform .12s ease;
+  }
+  .punch-btn:hover{transform:scale(1.03);}
+  .punch-btn:active{transform:scale(0.97);}
+  .punch-btn.act-in{background:radial-gradient(circle at 35% 30%, var(--teal), var(--teal-dark));}
+  .punch-btn.act-out{background:radial-gradient(circle at 35% 30%, var(--ink), var(--ink-dark));}
+  .punch-btn small{font-family:'IBM Plex Sans Arabic',sans-serif; font-weight:500; font-size:12px; opacity:0.85;}
+  .last-stamp{font-size:12.5px; color:var(--text-mute);}
+  .last-stamp b{color:var(--text-dark);}
+
+  table{width:100%; border-collapse:collapse; font-size:13.5px;}
+  th{text-align:right; color:var(--text-mute); font-weight:600; font-size:12px; padding:9px 10px; border-bottom:1.5px solid var(--panel-line);}
+  td{padding:10px 10px; border-bottom:1px solid var(--panel-line); vertical-align:middle;}
+  tr:last-child td{border-bottom:none;}
+  .type-tag{display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600; padding:4px 10px; border-radius:999px;}
+  .type-tag.in{background:rgba(47,156,110,0.12); color:var(--teal-dark);}
+  .type-tag.out{background:rgba(178,58,46,0.1); color:var(--ink);}
+  .empty-row{text-align:center; color:var(--text-mute); padding:30px 10px; font-size:13px;}
+
+  .filters{display:flex; gap:12px; margin-bottom:16px; flex-wrap:wrap;}
+  .filters .field{margin:0; min-width:160px; flex:1;}
+
+  .stat-row{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; margin-bottom:20px;}
+  .stat-card{background:#fff; border-radius:10px; padding:16px; border:1px solid var(--panel-line);}
+  .stat-card .num{font-family:'Cairo',sans-serif; font-weight:800; font-size:26px; color:var(--text-dark);}
+  .stat-card .lbl{font-size:12px; color:var(--text-mute); margin-top:2px;}
+
+  .row-between{display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;}
+  .add-emp-btn{background:var(--bg-deep); color:var(--text-light); padding:10px 18px; border-radius:9px; font-size:13px; font-weight:600;}
+  .add-emp-btn:hover{background:var(--bg-deep-2);}
+
+  .modal-backdrop{
+    position:fixed; inset:0; background:rgba(16,24,43,0.72);
+    display:flex; align-items:center; justify-content:center; padding:20px; z-index:50;
+  }
+  .modal{
+    background:var(--panel); border-radius:16px; padding:30px 26px;
+    max-width:380px; width:100%; text-align:center; box-shadow:0 30px 70px -20px rgba(0,0,0,0.6);
+  }
+  .modal h3{font-size:18px; margin-bottom:6px;}
+  .modal .sub{color:var(--text-mute); font-size:13px; margin-bottom:22px;}
+
+  .scanner{
+    width:120px; height:120px; margin:0 auto 20px; position:relative;
+    display:flex; align-items:center; justify-content:center; border-radius:50%;
+    background:#fff; border:2px solid var(--panel-line);
+  }
+  .scanner svg{width:56px; height:56px;}
+  .scanner .ring{position:absolute; inset:0; border-radius:50%; stroke-dasharray:339; stroke-dashoffset:339;}
+  .scanner.scanning .ring{animation:ringfill 1.3s linear forwards;}
+  .scanner.done{border-color:var(--teal);}
+  @keyframes ringfill{ to{stroke-dashoffset:0;} }
+  .scan-status{font-size:13px; color:var(--text-mute); min-height:18px;}
+
+  .loc-row{display:flex; align-items:center; justify-content:center; gap:6px; font-size:12.5px; color:var(--text-mute); margin-bottom:18px;}
+  .loc-row.ok{color:var(--teal-dark);}
+  .loc-row.bad{color:var(--danger);}
+
+  .modal-actions{display:flex; gap:10px; margin-top:6px;}
+  .modal-actions button{flex:1;}
+  .secondary-btn{background:transparent; color:var(--text-mute); border:1.5px solid var(--panel-line) !important; padding:12px; border-radius:9px; font-size:14px;}
+  .secondary-btn:hover{background:rgba(0,0,0,0.03);}
+
+  .stamp-result{display:flex; flex-direction:column; align-items:center; gap:12px;}
+  .stamp-mark{
+    font-family:'Cairo',sans-serif; font-weight:800; font-size:22px; color:#fff;
+    padding:14px 26px; border-radius:10px; transform:rotate(-6deg) scale(0.5); opacity:0;
+    animation:stampIn .4s cubic-bezier(.2,1.4,.5,1) forwards; border:3px solid rgba(255,255,255,0.4);
+  }
+  .stamp-mark.in{background:var(--teal-dark);}
+  .stamp-mark.out{background:var(--ink);}
+  @keyframes stampIn{
+    0%{transform:rotate(-6deg) scale(2.2); opacity:0;}
+    60%{transform:rotate(-6deg) scale(0.92); opacity:1;}
+    100%{transform:rotate(-6deg) scale(1); opacity:1;}
+  }
+
+  .toast{
+    position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+    background:var(--bg-deep); color:var(--text-light); padding:12px 20px; border-radius:10px;
+    font-size:13.5px; box-shadow:0 15px 40px -10px rgba(0,0,0,0.5); z-index:80;
+    opacity:0; transition:opacity .25s ease; display:flex; align-items:center; gap:8px;
+  }
+  .toast.show{opacity:1;}
+  .toast.err{background:var(--danger);}
+
+  .boot-msg{color:rgba(246,243,236,0.6); margin:auto; font-size:14px; display:flex; flex-direction:column; align-items:center; gap:10px; text-align:center;}
+
+  @media (max-width:640px){
+    .topbar{padding:14px 16px;}
+    .who-name{display:none;}
+    main{padding:20px 12px 50px;}
+    .panel{padding:18px;}
+  }
+  @media (prefers-reduced-motion: reduce){
+    *{animation-duration:0.01ms !important; transition-duration:0.01ms !important;}
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-mark">⏱</div>
+    <div>
+      <div class="brand-name">ساعة الحضور</div>
+      <div class="brand-sub">نظام حضور وانصراف الموظفين</div>
+    </div>
+  </div>
+  <div id="topbar-right"></div>
+</div>
+
+<main id="app"></main>
+
+<script>
+/* ============ Firebase setup ============ */
+const firebaseConfig = {
+  apiKey: "AIzaSyDnP8L5kj4mzLiiQYme8nzA7hrd3ou11xI",
+  authDomain: "work-app-4fe46.firebaseapp.com",
+  projectId: "work-app-4fe46",
+  storageBucket: "work-app-4fe46.firebasestorage.app",
+  messagingSenderId: "805492846342",
+  appId: "1:805492846342:web:2547c641e401d8a752f887"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const usersCol = db.collection('users');
+const attendanceCol = db.collection('attendance');
+
+/* ============ App state ============ */
+let users = [];
+let attendance = [];
+let currentUser = null;
+let clockInterval = null;
+let bootError = false;
+
+/* ============ Utilities ============ */
+function fmtTime(ts){ return new Date(ts).toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit'}); }
+function fmtDate(ts){ return new Date(ts).toLocaleDateString('ar-EG', {day:'2-digit', month:'2-digit', year:'numeric'}); }
+function todayKey(ts){ const d = new Date(ts); return d.getFullYear()+'-'+d.getMonth()+'-'+d.getDate(); }
+function showToast(msg, isErr){
+  const old = document.querySelector('.toast');
+  if(old) old.remove();
+  const t = document.createElement('div');
+  t.className = 'toast' + (isErr ? ' err' : '');
+  t.textContent = msg;
+  document.body.appendChild(t);
+  requestAnimationFrame(()=> t.classList.add('show'));
+  setTimeout(()=>{ t.classList.remove('show'); setTimeout(()=>t.remove(), 300); }, 2600);
+}
+
+/* ============ Header clock ============ */
+function renderTopbarRight(){
+  const el = document.getElementById('topbar-right');
+  if(!currentUser){
+    el.innerHTML = `<div class="clock"><span class="date" id="hdr-date"></span><span class="mono" id="hdr-time"></span></div>`;
+  } else {
+    el.innerHTML = `
+      <div style="display:flex; align-items:center; gap:18px;">
+        <div class="clock"><span class="date" id="hdr-date"></span><span class="mono" id="hdr-time"></span></div>
+        <div class="who">
+          <div>
+            <div class="who-name">${currentUser.name}</div>
+            <div class="who-role">${currentUser.role === 'manager' ? 'مدير' : 'موظف'}</div>
+          </div>
+          <button class="logout-btn" id="change-pass-btn">تغيير كلمة المرور</button>
+          <button class="logout-btn" id="logout-btn">تسجيل خروج</button>
+        </div>
+      </div>`;
+    document.getElementById('logout-btn').onclick = logout;
+    document.getElementById('change-pass-btn').onclick = openChangePasswordModal;
+  }
+  updateClock();
+  if(clockInterval) clearInterval(clockInterval);
+  clockInterval = setInterval(updateClock, 1000 * 30);
+}
+function updateClock(){
+  const now = new Date();
+  const d = document.getElementById('hdr-date');
+  const t = document.getElementById('hdr-time');
+  if(d) d.textContent = now.toLocaleDateString('ar-EG', {weekday:'long', day:'2-digit', month:'long'});
+  if(t) t.textContent = now.toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit'});
+}
+
+/* ============ Login ============ */
+function renderLogin(errMsg){
+  renderTopbarRight();
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div class="login-wrap">
+      <div class="punch-hero">
+        <div class="brand-mark">⏱</div>
+        <h1>ساعة الحضور</h1>
+        <p>سجّل الدخول عشان تقيّد حضورك أو تتابع فريقك</p>
+      </div>
+      <div class="login-card">
+        ${errMsg ? `<div class="error-msg">${errMsg}</div>` : ''}
+        <div class="field">
+          <label for="login-user">اسم المستخدم</label>
+          <input id="login-user" type="text" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="مثال: ahmed">
+        </div>
+        <div class="field">
+          <label for="login-pass">كلمة المرور</label>
+          <input id="login-pass" type="password" autocomplete="current-password" placeholder="••••••••">
+        </div>
+        <button class="primary-btn" id="login-btn">تسجيل الدخول</button>
+        <button class="ghost-btn" id="show-signup-btn" style="width:100%; margin-top:4px;">مش عندك حساب؟ إنشاء حساب جديد</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('login-btn').onclick = doLogin;
+  document.getElementById('show-signup-btn').onclick = () => renderSignup();
+  document.getElementById('login-pass').addEventListener('keydown', e=>{ if(e.key === 'Enter') doLogin(); });
+  document.getElementById('login-user').focus();
+}
+function doLogin(){
+  const u = document.getElementById('login-user').value.trim();
+  const p = document.getElementById('login-pass').value;
+  const found = users.find(x => x.username.toLowerCase() === u.toLowerCase() && x.password === p);
+  if(!found){ renderLogin('اسم المستخدم أو كلمة المرور غير صحيحة'); return; }
+  currentUser = found;
+  route();
+}
+function logout(){ currentUser = null; renderLogin(); }
+
+/* ============ Signup ============ */
+function renderSignup(errMsg){
+  renderTopbarRight();
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div class="login-wrap">
+      <div class="punch-hero">
+        <div class="brand-mark">⏱</div>
+        <h1>إنشاء حساب جديد</h1>
+        <p>هتقدر تسجل حضورك وانصرافك بعد ما تكمل بياناتك</p>
+      </div>
+      <div class="login-card">
+        ${errMsg ? `<div class="error-msg">${errMsg}</div>` : ''}
+        <div class="field">
+          <label for="su-name">الاسم الكامل</label>
+          <input id="su-name" type="text" placeholder="مثال: محمد سيد">
+        </div>
+        <div class="field">
+          <label for="su-user">اسم المستخدم</label>
+          <input id="su-user" type="text" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="مثال: mohamed">
+        </div>
+        <div class="field">
+          <label for="su-pass">كلمة المرور</label>
+          <input id="su-pass" type="password" autocomplete="new-password" placeholder="••••••••">
+        </div>
+        <div class="field">
+          <label for="su-confirm">تأكيد كلمة المرور</label>
+          <input id="su-confirm" type="password" autocomplete="new-password" placeholder="••••••••">
+        </div>
+        <button class="primary-btn" id="signup-btn">إنشاء الحساب</button>
+        <button class="ghost-btn" id="show-login-btn" style="width:100%; margin-top:4px;">عندك حساب؟ تسجيل الدخول</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('signup-btn').onclick = doSignup;
+  document.getElementById('show-login-btn').onclick = () => renderLogin();
+  document.getElementById('su-confirm').addEventListener('keydown', e=>{ if(e.key === 'Enter') doSignup(); });
+  document.getElementById('su-name').focus();
+}
+async function doSignup(){
+  const name = document.getElementById('su-name').value.trim();
+  const username = document.getElementById('su-user').value.trim();
+  const pass = document.getElementById('su-pass').value;
+  const confirm = document.getElementById('su-confirm').value;
+
+  if(!name || !username || !pass){ renderSignup('من فضلك املأ كل الحقول'); return; }
+  if(pass.length < 4){ renderSignup('كلمة المرور لازم تكون 4 حروف/أرقام على الأقل'); return; }
+  if(pass !== confirm){ renderSignup('كلمة المرور وتأكيدها مش متطابقين'); return; }
+  if(users.some(u => u.username.toLowerCase() === username.toLowerCase())){
+    renderSignup('اسم المستخدم ده مستخدم بالفعل، جرب اسم تاني'); return;
+  }
+  try{
+    const docRef = await usersCol.add({ username, password: pass, name, role:'employee' });
+    currentUser = { id: docRef.id, username, password: pass, name, role:'employee' };
+    showToast(`أهلًا بيك يا ${name}، تم إنشاء حسابك`);
+    route();
+  }catch(e){
+    renderSignup('حصلت مشكلة أثناء إنشاء الحساب، حاول تاني');
+  }
+}
+
+/* ============ Routing ============ */
+function route(){
+  if(!currentUser){ renderLogin(); return; }
+  const fresh = users.find(u => u.id === currentUser.id);
+  if(fresh) currentUser = fresh;
+  renderTopbarRight();
+  if(currentUser.role === 'manager') renderManagerDashboard();
+  else renderEmployeeDashboard();
+}
+
+/* ============ Employee dashboard ============ */
+function getMyRecords(){
+  return attendance.filter(r => r.userId === currentUser.id).sort((a,b)=> b.ts - a.ts);
+}
+function getNextAction(){
+  const mine = getMyRecords();
+  if(mine.length === 0) return 'in';
+  return mine[0].type === 'in' ? 'out' : 'in';
+}
+function renderEmployeeDashboard(){
+  const app = document.getElementById('app');
+  const nextAction = getNextAction();
+  const mine = getMyRecords();
+  const last = mine[0];
+
+  app.innerHTML = `
+    <div class="dash">
+      <div class="panel">
+        <h2>تسجيل الحضور</h2>
+        <div class="sub">اضغط الزر لتسجيل ${nextAction === 'in' ? 'حضورك' : 'انصرافك'} الآن</div>
+        <div class="punchcard">
+          <span class="status-pill ${nextAction === 'in' ? 'out' : 'in'}">
+            <span class="status-dot"></span>
+            ${nextAction === 'in' ? 'خارج العمل حاليًا' : 'داخل العمل حاليًا'}
+          </span>
+          <button class="punch-btn ${nextAction === 'in' ? 'act-in' : 'act-out'}" id="punch-btn">
+            ${nextAction === 'in' ? '↩' : '↪'}
+            <span>${nextAction === 'in' ? 'تسجيل حضور' : 'تسجيل انصراف'}</span>
+            <small>اضغط للمتابعة</small>
+          </button>
+          <div class="last-stamp">
+            ${last ? `آخر تسجيل: <b>${last.type === 'in' ? 'حضور' : 'انصراف'}</b> — ${fmtDate(last.ts)} الساعة ${fmtTime(last.ts)}` : 'لسه معملتش أي تسجيل'}
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>سجل حضوري</h2>
+        <div class="sub">آخر التسجيلات الخاصة بيك فقط</div>
+        ${renderAttendanceTable(mine, false)}
+      </div>
+    </div>
+  `;
+  document.getElementById('punch-btn').onclick = () => openPunchModal(nextAction);
+}
+
+/* ============ Punch modal (GPS + simulated fingerprint) ============ */
+function openPunchModal(type){
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal" id="punch-modal">
+      <h3>${type === 'in' ? 'تأكيد الحضور' : 'تأكيد الانصراف'}</h3>
+      <div class="sub">هنتأكد من موقعك وهويتك قبل التسجيل</div>
+      <div class="loc-row" id="loc-row">📍 جاري تحديد الموقع...</div>
+      <div class="scanner" id="scanner">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#B23A2E" stroke-width="1.6">
+          <path d="M12 2c-3 0-5.5 2.2-5.5 5.2 0 1.7.5 2.7.5 4.3 0 3.5-1.5 5.8-3 7.5" stroke-linecap="round"/>
+          <path d="M12 2c3 0 5.5 2.2 5.5 5.2 0 3-1 4-1 7 0 2 .5 3.5 1.5 5" stroke-linecap="round"/>
+          <path d="M8.5 7.2C8.5 5.3 10 4 12 4s3.5 1.3 3.5 3.2c0 3.3 1 5 1 8.3" stroke-linecap="round"/>
+          <path d="M6.5 12c0 4-1 6.5-2.5 8.5" stroke-linecap="round"/>
+          <path d="M15.5 12.5c0 2.7.3 4.7 1.3 6.5" stroke-linecap="round"/>
+          <path d="M10 9.5c0 4 .5 6.5 3 9.5" stroke-linecap="round"/>
+        </svg>
+        <svg class="ring" viewBox="0 0 120 120" style="position:absolute; inset:0;">
+          <circle cx="60" cy="60" r="54" fill="none" stroke="#2F9C6E" stroke-width="4"/>
+        </svg>
+      </div>
+      <div class="scan-status" id="scan-status">اضغط "تأكيد بالبصمة" للمتابعة</div>
+      <div class="modal-actions">
+        <button class="secondary-btn" id="cancel-punch">إلغاء</button>
+        <button class="primary-btn" id="confirm-punch">تأكيد بالبصمة</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+
+  let coords = null;
+  const locRow = backdrop.querySelector('#loc-row');
+
+  if('geolocation' in navigator){
+    try{
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          coords = {lat: pos.coords.latitude.toFixed(5), lng: pos.coords.longitude.toFixed(5)};
+          locRow.textContent = `📍 تم تحديد الموقع (${coords.lat}, ${coords.lng})`;
+          locRow.className = 'loc-row ok';
+        },
+        err => {
+          locRow.textContent = '📍 تعذّر الوصول للموقع — هيتسجل بدون إحداثيات';
+          locRow.className = 'loc-row bad';
+        },
+        {timeout:8000}
+      );
+    }catch(e){
+      locRow.textContent = '📍 الموقع غير متاح هنا — هيتسجل بدون إحداثيات';
+      locRow.className = 'loc-row bad';
+    }
+  } else {
+    locRow.textContent = '📍 الموقع غير مدعوم على هذا الجهاز';
+    locRow.className = 'loc-row bad';
+  }
+
+  backdrop.querySelector('#cancel-punch').onclick = () => backdrop.remove();
+  backdrop.querySelector('#confirm-punch').onclick = (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    backdrop.querySelector('#cancel-punch').disabled = true;
+    const scanner = backdrop.querySelector('#scanner');
+    const status = backdrop.querySelector('#scan-status');
+    scanner.classList.add('scanning');
+    status.textContent = 'جاري التحقق من البصمة...';
+    setTimeout(async () => {
+      scanner.classList.remove('scanning');
+      scanner.classList.add('done');
+      status.textContent = 'تم التحقق ✓';
+      await finalizePunch(type, coords, backdrop);
+    }, 1300);
+  };
+}
+
+async function finalizePunch(type, coords, backdrop){
+  const record = {
+    userId: currentUser.id,
+    name: currentUser.name,
+    username: currentUser.username,
+    type: type,
+    ts: Date.now(),
+    lat: coords ? coords.lat : null,
+    lng: coords ? coords.lng : null
+  };
+  let ok = true;
+  try{ await attendanceCol.add(record); }catch(e){ ok = false; }
+
+  const modal = backdrop.querySelector('#punch-modal');
+  modal.innerHTML = `
+    <div class="stamp-result">
+      <div class="stamp-mark ${type}">${type === 'in' ? 'تم تسجيل الحضور' : 'تم تسجيل الانصراف'}</div>
+      <div class="sub" style="margin:0;">${fmtDate(record.ts)} — الساعة ${fmtTime(record.ts)}</div>
+      <button class="primary-btn" id="close-modal" style="margin-top:10px;">تمام</button>
+    </div>
+  `;
+  modal.querySelector('#close-modal').onclick = () => {
+    backdrop.remove();
+    if(!ok) showToast('حصلت مشكلة في حفظ التسجيل، حاول تاني', true);
+    route();
+  };
+}
+
+/* ============ Attendance table ============ */
+function renderAttendanceTable(records, showName){
+  if(records.length === 0) return `<div class="empty-row">مفيش تسجيلات لسه</div>`;
+  const rows = records.slice(0, 100).map(r => `
+    <tr>
+      ${showName ? `<td>${r.name}</td>` : ''}
+      <td>${fmtDate(r.ts)}</td>
+      <td>${fmtTime(r.ts)}</td>
+      <td><span class="type-tag ${r.type}">${r.type === 'in' ? 'حضور' : 'انصراف'}</span></td>
+      <td class="mono" style="color:var(--text-mute); font-size:11.5px;">${r.lat ? `${r.lat}, ${r.lng}` : '—'}</td>
+    </tr>
+  `).join('');
+  return `
+    <table>
+      <thead><tr>
+        ${showName ? '<th>الاسم</th>' : ''}
+        <th>التاريخ</th><th>الوقت</th><th>النوع</th><th>الموقع</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+/* ============ Manager dashboard ============ */
+function renderManagerDashboard(){
+  const app = document.getElementById('app');
+  const employees = users.filter(u => u.role === 'employee');
+  const todayStr = todayKey(Date.now());
+  const presentToday = new Set(
+    attendance.filter(r => todayKey(r.ts) === todayStr && r.type === 'in').map(r => r.userId)
+  );
+
+  app.innerHTML = `
+    <div class="dash">
+      <div class="panel">
+        <div class="stat-row">
+          <div class="stat-card"><div class="num">${employees.length}</div><div class="lbl">إجمالي الموظفين</div></div>
+          <div class="stat-card"><div class="num">${presentToday.size}</div><div class="lbl">حضروا النهاردة</div></div>
+          <div class="stat-card"><div class="num">${Math.max(employees.length - presentToday.size, 0)}</div><div class="lbl">لسه ما حضرش</div></div>
+          <div class="stat-card"><div class="num">${attendance.length}</div><div class="lbl">إجمالي التسجيلات</div></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="row-between" style="margin-bottom:16px;">
+          <div>
+            <h2 style="margin-bottom:2px;">الموظفون</h2>
+            <div class="sub" style="margin-bottom:0;">إدارة حسابات الدخول</div>
+          </div>
+          <button class="add-emp-btn" id="add-emp-btn">+ إضافة موظف</button>
+        </div>
+        <table>
+          <thead><tr><th>الاسم</th><th>اسم المستخدم</th><th>الحالة اليوم</th><th>إجراءات</th></tr></thead>
+          <tbody>
+            ${employees.length === 0 ? `<tr><td colspan="4" class="empty-row">مفيش موظفين مضافين لسه</td></tr>` :
+              employees.map(e => `
+                <tr>
+                  <td>${e.name}</td>
+                  <td class="mono">${e.username}</td>
+                  <td><span class="status-pill ${presentToday.has(e.id) ? 'in' : 'out'}">
+                    <span class="status-dot"></span>${presentToday.has(e.id) ? 'حاضر' : 'غير مسجل'}
+                  </span></td>
+                  <td style="white-space:nowrap;">
+                    <button class="secondary-btn" style="padding:6px 10px; font-size:12px; width:auto; display:inline-block;" data-reset="${e.id}">تغيير الباسورد</button>
+                    <button class="secondary-btn" style="padding:6px 10px; font-size:12px; width:auto; display:inline-block; color:var(--danger); border-color:rgba(196,69,59,0.4) !important;" data-remove="${e.id}">حذف</button>
+                  </td>
+                </tr>
+              `).join('')}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="panel">
+        <h2>سجل الحضور والانصراف</h2>
+        <div class="sub">كل تسجيلات الفريق</div>
+        <div class="filters">
+          <div class="field">
+            <label for="filter-emp">تصفية حسب الموظف</label>
+            <select id="filter-emp">
+              <option value="">كل الموظفين</option>
+              ${employees.map(e => `<option value="${e.id}">${e.name}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label for="filter-date">تصفية حسب اليوم</label>
+            <input type="date" id="filter-date">
+          </div>
+        </div>
+        <div id="mgr-table">${renderAttendanceTable(attendance.slice().sort((a,b)=>b.ts-a.ts), true)}</div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('add-emp-btn').onclick = openAddEmployeeModal;
+  app.querySelectorAll('[data-reset]').forEach(btn => {
+    btn.onclick = () => openResetEmployeePasswordModal(btn.getAttribute('data-reset'));
+  });
+  app.querySelectorAll('[data-remove]').forEach(btn => {
+    btn.onclick = () => removeEmployee(btn.getAttribute('data-remove'));
+  });
+
+  const applyFilters = () => {
+    const empId = document.getElementById('filter-emp').value;
+    const dateVal = document.getElementById('filter-date').value;
+    let filtered = attendance.slice();
+    if(empId) filtered = filtered.filter(r => r.userId === empId);
+    if(dateVal){
+      const [y,m,d] = dateVal.split('-').map(Number);
+      filtered = filtered.filter(r => {
+        const rd = new Date(r.ts);
+        return rd.getFullYear() === y && (rd.getMonth()+1) === m && rd.getDate() === d;
+      });
+    }
+    filtered.sort((a,b)=> b.ts - a.ts);
+    document.getElementById('mgr-table').innerHTML = renderAttendanceTable(filtered, true);
+  };
+  document.getElementById('filter-emp').onchange = applyFilters;
+  document.getElementById('filter-date').onchange = applyFilters;
+}
+
+/* ============ Change password (self) ============ */
+function openChangePasswordModal(){
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal" style="text-align:right;">
+      <h3 style="text-align:center;">تغيير كلمة المرور</h3>
+      <div class="sub" style="text-align:center;">لحساب ${currentUser.name}</div>
+      <div id="cp-error"></div>
+      <div class="field"><label for="cp-old">كلمة المرور الحالية</label><input id="cp-old" type="password" placeholder="••••••••"></div>
+      <div class="field"><label for="cp-new">كلمة المرور الجديدة</label><input id="cp-new" type="password" placeholder="••••••••"></div>
+      <div class="field"><label for="cp-confirm">تأكيد كلمة المرور الجديدة</label><input id="cp-confirm" type="password" placeholder="••••••••"></div>
+      <div class="modal-actions">
+        <button class="secondary-btn" id="cp-cancel">إلغاء</button>
+        <button class="primary-btn" id="cp-save">حفظ</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.querySelector('#cp-cancel').onclick = () => backdrop.remove();
+  backdrop.querySelector('#cp-save').onclick = async () => {
+    const oldP = document.getElementById('cp-old').value;
+    const newP = document.getElementById('cp-new').value;
+    const confP = document.getElementById('cp-confirm').value;
+    const errBox = document.getElementById('cp-error');
+    if(oldP !== currentUser.password){ errBox.innerHTML = `<div class="error-msg">كلمة المرور الحالية غلط</div>`; return; }
+    if(!newP || newP.length < 4){ errBox.innerHTML = `<div class="error-msg">كلمة المرور الجديدة لازم تكون 4 حروف/أرقام على الأقل</div>`; return; }
+    if(newP !== confP){ errBox.innerHTML = `<div class="error-msg">كلمة المرور الجديدة مش متطابقة مع التأكيد</div>`; return; }
+    try{
+      await usersCol.doc(currentUser.id).update({ password: newP });
+      currentUser.password = newP;
+      backdrop.remove();
+      showToast('تم تغيير كلمة المرور بنجاح');
+    }catch(e){
+      errBox.innerHTML = `<div class="error-msg">حصلت مشكلة أثناء الحفظ</div>`;
+    }
+  };
+}
+
+/* ============ Manager: employee management ============ */
+function openResetEmployeePasswordModal(empId){
+  const emp = users.find(u => u.id === empId);
+  if(!emp) return;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal" style="text-align:right;">
+      <h3 style="text-align:center;">إعادة تعيين كلمة المرور</h3>
+      <div class="sub" style="text-align:center;">لموظف: ${emp.name}</div>
+      <div id="rp-error"></div>
+      <div class="field"><label for="rp-new">كلمة المرور الجديدة</label><input id="rp-new" type="text" placeholder="كلمة مرور جديدة"></div>
+      <div class="modal-actions">
+        <button class="secondary-btn" id="rp-cancel">إلغاء</button>
+        <button class="primary-btn" id="rp-save">حفظ</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.querySelector('#rp-cancel').onclick = () => backdrop.remove();
+  backdrop.querySelector('#rp-save').onclick = async () => {
+    const newP = document.getElementById('rp-new').value;
+    if(!newP || newP.length < 4){
+      document.getElementById('rp-error').innerHTML = `<div class="error-msg">كلمة المرور لازم تكون 4 حروف/أرقام على الأقل</div>`;
+      return;
+    }
+    try{
+      await usersCol.doc(empId).update({ password: newP });
+      backdrop.remove();
+      showToast(`تم تغيير كلمة مرور ${emp.name}`);
+    }catch(e){
+      backdrop.remove();
+      showToast('حصلت مشكلة أثناء الحفظ', true);
+    }
+  };
+}
+
+function removeEmployee(empId){
+  const emp = users.find(u => u.id === empId);
+  if(!emp) return;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal">
+      <h3>تأكيد الحذف</h3>
+      <div class="sub">متأكد إنك عايز تحذف <b>${emp.name}</b>؟ سجل حضوره القديم هيفضل موجود، بس مش هيقدر يدخل تاني.</div>
+      <div class="modal-actions">
+        <button class="secondary-btn" id="rm-cancel">إلغاء</button>
+        <button class="primary-btn" id="rm-confirm" style="background:var(--danger);">حذف نهائيًا</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.querySelector('#rm-cancel').onclick = () => backdrop.remove();
+  backdrop.querySelector('#rm-confirm').onclick = async () => {
+    try{
+      await usersCol.doc(empId).delete();
+      backdrop.remove();
+      showToast(`تم حذف ${emp.name}`);
+    }catch(e){
+      backdrop.remove();
+      showToast('حصلت مشكلة أثناء الحذف', true);
+    }
+  };
+}
+
+function openAddEmployeeModal(){
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal" style="text-align:right;">
+      <h3 style="text-align:center;">إضافة موظف جديد</h3>
+      <div class="sub" style="text-align:center;">هيتقدر يسجل دخول بالبيانات دي</div>
+      <div id="add-emp-error"></div>
+      <div class="field"><label for="ne-name">الاسم الكامل</label><input id="ne-name" type="text" placeholder="مثال: محمد سيد"></div>
+      <div class="field"><label for="ne-user">اسم المستخدم</label><input id="ne-user" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="مثال: mohamed"></div>
+      <div class="field"><label for="ne-pass">كلمة المرور</label><input id="ne-pass" type="text" placeholder="كلمة مرور مبدئية"></div>
+      <div class="modal-actions">
+        <button class="secondary-btn" id="cancel-add">إلغاء</button>
+        <button class="primary-btn" id="save-add">حفظ الموظف</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.querySelector('#cancel-add').onclick = () => backdrop.remove();
+  backdrop.querySelector('#save-add').onclick = async () => {
+    const name = document.getElementById('ne-name').value.trim();
+    const username = document.getElementById('ne-user').value.trim();
+    const password = document.getElementById('ne-pass').value;
+    const errBox = document.getElementById('add-emp-error');
+    if(!name || !username || !password){ errBox.innerHTML = `<div class="error-msg">من فضلك املأ كل الحقول</div>`; return; }
+    if(users.some(u => u.username.toLowerCase() === username.toLowerCase())){
+      errBox.innerHTML = `<div class="error-msg">اسم المستخدم ده مستخدم بالفعل</div>`; return;
+    }
+    try{
+      await usersCol.add({ username, password, name, role:'employee' });
+      backdrop.remove();
+      showToast(`تمت إضافة ${name}`);
+    }catch(e){
+      errBox.innerHTML = `<div class="error-msg">حصلت مشكلة أثناء الحفظ</div>`;
+    }
+  };
+}
+
+/* ============ Boot: seed + live sync ============ */
+async function seedIfEmpty(){
+  try{
+    const snap = await usersCol.limit(1).get();
+    if(snap.empty){
+      const batch = db.batch();
+      batch.set(usersCol.doc(), {username:'manager', password:'admin123', name:'المدير العام', role:'manager'});
+      batch.set(usersCol.doc(), {username:'ahmed', password:'123456', name:'أحمد محمود', role:'employee'});
+      batch.set(usersCol.doc(), {username:'sara', password:'123456', name:'سارة علي', role:'employee'});
+      await batch.commit();
+    }
+  }catch(e){
+    bootError = true;
+  }
+}
+
+function startLiveSync(){
+  usersCol.onSnapshot(
+    snap => { users = snap.docs.map(d => ({id:d.id, ...d.data()})); route(); },
+    err => { showToast('في مشكلة في الاتصال بقاعدة البيانات', true); }
+  );
+  attendanceCol.onSnapshot(
+    snap => { attendance = snap.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b)=>b.ts-a.ts); route(); },
+    err => {}
+  );
+}
+
+(async function init(){
+  renderTopbarRight();
+  document.getElementById('app').innerHTML = `<div class="boot-msg">جاري تحميل بيانات الشركة...</div>`;
+  await seedIfEmpty();
+  if(bootError){
+    document.getElementById('app').innerHTML = `<div class="boot-msg">تعذر الاتصال بقاعدة البيانات.<br>راجع إعدادات Firebase (الاتصال بالإنترنت / قواعد الحماية).</div>`;
+    return;
+  }
+  startLiveSync();
+})();
+</script>
+</body>
+</html>
