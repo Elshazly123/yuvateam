@@ -155,6 +155,9 @@
   th.sortable{cursor:pointer; user-select:none;}
   th.sortable:hover{color:var(--text-dark);}
   .search-box{width:100%; max-width:280px;}
+  .scroll-list{max-height:380px; overflow-y:auto; border:1px solid var(--panel-line); border-radius:10px;}
+  .scroll-list table{margin:0;}
+  .scroll-list thead th{position:sticky; top:0; background:var(--panel); z-index:1;}
 
   .filters{display:flex; gap:12px; margin-bottom:16px; flex-wrap:wrap;}
   .filters .field{margin:0; min-width:160px; flex:1;}
@@ -282,7 +285,7 @@ let dashboardMonth = (() => {
   const n = new Date();
   return n.getFullYear() + '-' + String(n.getMonth()+1).padStart(2,'0');
 })();
-let settings = { workDays:[0,1,2,3,4,6], deductionPerDay:0, deductionPerLateMinute:0, currency:'جنيه', defaultStartTime:'09:00' };
+let settings = { workDays:[0,1,2,3,4,6], deductionPerDay:0, deductionPerLateMinute:0, currency:'جنيه', defaultStartTime:'09:00', defaultEndTime:'17:00', overtimeRatePerMinute:0 };
 let holidays = [];
 let departments = [];
 let leaveRequests = [];
@@ -337,6 +340,17 @@ function countFullMonthWorkDays(year, monthIdx){
   }
   return count;
 }
+function countElapsedWorkDays(year, monthIdx){
+  const today = new Date();
+  const daysInMonth = new Date(year, monthIdx+1, 0).getDate();
+  let count = 0;
+  for(let d = 1; d <= daysInMonth; d++){
+    const date = new Date(year, monthIdx, d);
+    if(date > today) break;
+    if(isWorkDay(date) && !isHoliday(date)) count++;
+  }
+  return count;
+}
 function fmtMinutes(mins){
   if(mins <= 0) return '0 د';
   const h = Math.floor(mins/60), m = mins%60;
@@ -350,12 +364,16 @@ function dayLabel(date){ return date.toLocaleDateString('ar-EG', {weekday:'long'
 function computeEmployeeMonth(emp, year, month){
   const today = new Date();
   const startTime = emp.startTime || settings.defaultStartTime || '09:00';
+  const endTime = emp.endTime || settings.defaultEndTime || '17:00';
   const [sh, sm] = startTime.split(':').map(Number);
+  const [eh, em] = endTime.split(':').map(Number);
   const daysInMonth = new Date(year, month+1, 0).getDate();
   const myIns = attendance.filter(r => r.userId === emp.id && r.type === 'in');
+  const myOuts = attendance.filter(r => r.userId === emp.id && r.type === 'out');
 
   const days = [];
   let presentDays = 0, absentDays = 0, lateCount = 0, lateMinutesTotal = 0, workDaysCount = 0, leaveDays = 0, holidayDays = 0;
+  let overtimeDays = 0, overtimeMinutesTotal = 0;
 
   for(let d = 1; d <= daysInMonth; d++){
     const date = new Date(year, month, d);
@@ -378,6 +396,17 @@ function computeEmployeeMonth(emp, year, month){
       const rd = new Date(r.ts);
       return rd.getFullYear() === year && rd.getMonth() === month && rd.getDate() === d;
     }).sort((a,b) => a.ts - b.ts);
+    const dayOuts = myOuts.filter(r => {
+      const rd = new Date(r.ts);
+      return rd.getFullYear() === year && rd.getMonth() === month && rd.getDate() === d;
+    }).sort((a,b) => a.ts - b.ts);
+    let overtimeMin = 0;
+    if(dayOuts.length > 0){
+      const lastOut = new Date(dayOuts[dayOuts.length - 1].ts);
+      const expectedEnd = new Date(year, month, d, eh, em);
+      const diff = Math.round((lastOut - expectedEnd) / 60000);
+      if(diff > 0){ overtimeMin = diff; overtimeDays++; overtimeMinutesTotal += diff; }
+    }
 
     if(dayRecs.length === 0){
       absentDays++;
@@ -390,14 +419,15 @@ function computeEmployeeMonth(emp, year, month){
       if(diffMin > 0){
         lateCount++;
         lateMinutesTotal += diffMin;
-        days.push({date, status:'late', ts:dayRecs[0].ts, lateMin:diffMin});
+        days.push({date, status:'late', ts:dayRecs[0].ts, lateMin:diffMin, outTs: dayOuts.length ? dayOuts[dayOuts.length-1].ts : null, overtimeMin});
       } else {
-        days.push({date, status:'ontime', ts:dayRecs[0].ts});
+        days.push({date, status:'ontime', ts:dayRecs[0].ts, outTs: dayOuts.length ? dayOuts[dayOuts.length-1].ts : null, overtimeMin});
       }
     }
   }
   const deduction = (absentDays * (settings.deductionPerDay || 0)) + (lateMinutesTotal * (settings.deductionPerLateMinute || 0));
-  return { workDaysCount, presentDays, absentDays, lateCount, lateMinutesTotal, leaveDays, holidayDays, deduction, days };
+  const overtimePay = overtimeMinutesTotal * (settings.overtimeRatePerMinute || 0);
+  return { workDaysCount, presentDays, absentDays, lateCount, lateMinutesTotal, leaveDays, holidayDays, overtimeDays, overtimeMinutesTotal, overtimePay, deduction, days };
 }
 function showToast(msg, isErr){
   const old = document.querySelector('.toast');
@@ -459,7 +489,7 @@ function updateClock(){
 }
 
 /* ============ Login ============ */
-function renderLogin(errMsg){
+function renderLogin(errMsg, prefillUser){
   authScreenRendered = 'login';
   renderTopbarRight();
   const app = document.getElementById('app');
@@ -474,7 +504,7 @@ function renderLogin(errMsg){
         ${errMsg ? `<div class="error-msg">${errMsg}</div>` : ''}
         <div class="field">
           <label for="login-user">اسم المستخدم</label>
-          <input id="login-user" type="text" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="مثال: ahmed">
+          <input id="login-user" type="text" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="مثال: ahmed" value="${prefillUser ? prefillUser.replace(/"/g,'') : ''}">
         </div>
         <div class="field">
           <label for="login-pass">كلمة المرور</label>
@@ -488,13 +518,14 @@ function renderLogin(errMsg){
   document.getElementById('login-btn').onclick = doLogin;
   document.getElementById('show-signup-btn').onclick = () => renderSignup();
   document.getElementById('login-pass').addEventListener('keydown', e=>{ if(e.key === 'Enter') doLogin(); });
-  document.getElementById('login-user').focus();
+  if(prefillUser) document.getElementById('login-pass').focus();
+  else document.getElementById('login-user').focus();
 }
 function doLogin(){
   const u = document.getElementById('login-user').value.trim();
   const p = document.getElementById('login-pass').value;
   const found = users.find(x => x.username.toLowerCase() === u.toLowerCase() && x.password === p);
-  if(!found){ renderLogin('اسم المستخدم أو كلمة المرور غير صحيحة'); return; }
+  if(!found){ renderLogin('اسم المستخدم أو كلمة المرور غير صحيحة', u); return; }
   currentUser = found;
   route();
 }
@@ -583,6 +614,30 @@ function updateBrandLogo(){
   if(nameEl && settings.companyName) nameEl.textContent = settings.companyName;
 }
 
+/* ============ Permissions ============ */
+const PERMISSION_DEFS = [
+  {key:'addEmployees', label:'إضافة موظفين جدد'},
+  {key:'removeEmployees', label:'حذف موظفين'},
+  {key:'editEmployees', label:'تعديل بيانات الموظفين (ميعاد الحضور والقسم)'},
+  {key:'resetPasswords', label:'إعادة تعيين كلمات مرور الموظفين'},
+  {key:'manageSettings', label:'إدارة الإعدادات العامة (أيام الشغل، الخصومات، العطلات، الأقسام)'},
+  {key:'manageLeaves', label:'الموافقة/الرفض على طلبات الإجازة'},
+  {key:'manualEntry', label:'تسجيل حضور/انصراف يدوي'},
+  {key:'manageManagers', label:'تعيين مديرين ومشرفين وإدارة الصلاحيات ودعوات الانضمام'}
+];
+const FULL_PERMS = Object.fromEntries(PERMISSION_DEFS.map(p => [p.key, true]));
+function getPerms(user){
+  if(user.role === 'manager'){
+    // no saved permissions object = legacy/founding manager account = full access
+    const p = user.permissions ? {...user.permissions} : {...FULL_PERMS};
+    p.isManager = true;
+    return p;
+  }
+  const none = Object.fromEntries(PERMISSION_DEFS.map(p => [p.key, false]));
+  none.isManager = false;
+  return none;
+}
+
 /* ============ Routing ============ */
 function route(){
   updateBrandLogo();
@@ -596,8 +651,8 @@ function route(){
   if(fresh) currentUser = fresh;
   renderTopbarRight();
   if(currentUser.role === 'manager' && currentView === 'settings'){ renderSettingsPage(); return; }
-  if(currentUser.role === 'manager') renderManagerDashboard(true);
-  else if(currentUser.role === 'supervisor') renderManagerDashboard(false);
+  if(currentUser.role === 'manager') renderManagerDashboard(getPerms(currentUser));
+  else if(currentUser.role === 'supervisor') renderManagerDashboard(getPerms(currentUser));
   else renderEmployeeDashboard();
 }
 
@@ -651,7 +706,7 @@ function renderEmployeeDashboard(){
           </div>
           <button class="add-emp-btn" id="req-leave-btn">+ طلب إجازة جديدة</button>
         </div>
-        <div id="leave-mgr-list"></div>
+        <div id="leave-mgr-list" class="scroll-list"></div>
       </div>
     </div>
   `;
@@ -790,7 +845,7 @@ function renderAttendanceTable(records, showName){
 }
 
 /* ============ Manager dashboard ============ */
-function renderManagerDashboard(isManager){
+function renderManagerDashboard(perms){
   const app = document.getElementById('app');
   const employees = users.filter(u => u.role === 'employee' && !pendingDeleteIds.has(u.id));
   const todayStr = todayKey(Date.now());
@@ -818,7 +873,7 @@ function renderManagerDashboard(isManager){
   app.innerHTML = `
     <div class="dash">
       <div class="panel">
-        <div class="row-between" style="margin-bottom:${isManager ? '16px':'0'};">
+        <div class="row-between" style="margin-bottom:${perms.isManager ? '16px':'0'};">
           <div class="stat-row" style="margin:0; flex:1;">
             <div class="stat-card"><div class="num">${employees.length}</div><div class="lbl">إجمالي الموظفين</div></div>
             <div class="stat-card"><div class="num">${presentToday.size}</div><div class="lbl">حضروا النهاردة</div></div>
@@ -839,9 +894,9 @@ function renderManagerDashboard(isManager){
             <div style="display:flex; flex-wrap:wrap; gap:6px;">${notYetNames.map(n => `<span class="type-tag out">${n}</span>`).join('')}</div>
           </div>` : ''}
         </div>` : `<div class="sub" style="margin:10px 0 0;">الحمد لله، الكل حاضر وفي الميعاد لحد دلوقتي ✅</div>`}
-        ${isManager ? `<div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap;">
-          <button class="add-emp-btn" id="open-settings-btn">⚙️ الإعدادات العامة</button>
-          <button class="secondary-btn" id="manual-entry-btn" style="width:auto; padding:10px 18px;">✍️ تسجيل حضور يدوي</button>
+        ${(perms.manageSettings || perms.manageManagers || perms.manualEntry) ? `<div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap;">
+          ${(perms.manageSettings || perms.manageManagers) ? `<button class="add-emp-btn" id="open-settings-btn">⚙️ الإعدادات العامة</button>` : ''}
+          ${perms.manualEntry ? `<button class="secondary-btn" id="manual-entry-btn" style="width:auto; padding:10px 18px;">✍️ تسجيل حضور يدوي</button>` : ''}
         </div>` : ''}
       </div>
 
@@ -869,8 +924,8 @@ function renderManagerDashboard(isManager){
 
       <div class="panel">
         <h2 style="margin-bottom:2px;">طلبات الإجازة</h2>
-        <div class="sub">${isManager ? 'راجع ووافق أو ارفض طلبات الموظفين' : 'كل طلبات الإجازة في الشركة'}</div>
-        <div id="leave-mgr-list"></div>
+        <div class="sub">${perms.manageLeaves ? 'راجع ووافق أو ارفض طلبات الموظفين' : 'كل طلبات الإجازة في الشركة'}</div>
+        <div id="leave-mgr-list" class="scroll-list"></div>
       </div>
 
       <div class="panel">
@@ -879,13 +934,13 @@ function renderManagerDashboard(isManager){
             <h2 style="margin-bottom:2px;">الموظفون</h2>
             <div class="sub" style="margin-bottom:0;">إدارة حسابات الدخول</div>
           </div>
-          ${isManager ? `<button class="add-emp-btn" id="add-emp-btn">+ إضافة موظف</button>` : ''}
+          ${perms.addEmployees ? `<button class="add-emp-btn" id="add-emp-btn">+ إضافة موظف</button>` : ''}
         </div>
         <input type="text" id="emp-search" class="search-box" placeholder="🔍 بحث بالاسم أو اسم المستخدم..." style="margin-bottom:14px; padding:10px 13px; border-radius:9px; border:1.5px solid var(--panel-line); font-size:13px; font-family:inherit;">
         <table>
-          <thead><tr><th>الاسم</th><th>اسم المستخدم</th><th>القسم</th><th>الحالة اليوم</th>${isManager ? '<th>إجراءات</th>' : ''}</tr></thead>
+          <thead><tr><th>الاسم</th><th>اسم المستخدم</th><th>القسم</th><th>الحالة اليوم</th>${perms.isManager ? '<th>إجراءات</th>' : ''}</tr></thead>
           <tbody id="emp-tbody">
-            ${employees.length === 0 ? `<tr><td colspan="${isManager ? 5 : 4}" class="empty-row">مفيش موظفين مضافين لسه</td></tr>` :
+            ${employees.length === 0 ? `<tr><td colspan="${perms.isManager ? 5 : 4}" class="empty-row">مفيش موظفين مضافين لسه</td></tr>` :
               employees.map(e => `
                 <tr data-name="${e.name.toLowerCase()} ${e.username.toLowerCase()}">
                   <td>${e.name}</td>
@@ -894,11 +949,11 @@ function renderManagerDashboard(isManager){
                   <td><span class="status-pill ${presentToday.has(e.id) ? 'in' : 'out'}">
                     <span class="status-dot"></span>${presentToday.has(e.id) ? 'حاضر' : 'غير مسجل'}
                   </span></td>
-                  ${isManager ? `
+                  ${perms.isManager ? `
                   <td style="white-space:nowrap;">
-                    <button class="secondary-btn" style="padding:6px 10px; font-size:12px; width:auto; display:inline-block;" data-edit="${e.id}">بيانات الموظف</button>
-                    <button class="secondary-btn" style="padding:6px 10px; font-size:12px; width:auto; display:inline-block;" data-reset="${e.id}">تغيير الباسورد</button>
-                    <button class="secondary-btn" style="padding:6px 10px; font-size:12px; width:auto; display:inline-block; color:var(--danger); border-color:rgba(196,69,59,0.4) !important;" data-remove="${e.id}">حذف</button>
+                    ${perms.editEmployees ? `<button class="secondary-btn" style="padding:6px 10px; font-size:12px; width:auto; display:inline-block;" data-edit="${e.id}">بيانات الموظف</button>` : ''}
+                    ${perms.resetPasswords ? `<button class="secondary-btn" style="padding:6px 10px; font-size:12px; width:auto; display:inline-block;" data-reset="${e.id}">تغيير الباسورد</button>` : ''}
+                    ${perms.removeEmployees ? `<button class="secondary-btn" style="padding:6px 10px; font-size:12px; width:auto; display:inline-block; color:var(--danger); border-color:rgba(196,69,59,0.4) !important;" data-remove="${e.id}">حذف</button>` : ''}
                   </td>` : ''}
                 </tr>
               `).join('')}
@@ -926,14 +981,14 @@ function renderManagerDashboard(isManager){
             <input type="date" id="filter-date">
           </div>
         </div>
-        <div id="mgr-table">${renderAttendanceTable(attendance.slice().sort((a,b)=>b.ts-a.ts), true)}</div>
+        <div id="mgr-table" class="scroll-list">${renderAttendanceTable(attendance.slice().sort((a,b)=>b.ts-a.ts), true)}</div>
       </div>
 
-      ${isManager ? `
+      ${perms.isManager ? `
       <div class="panel">
         <h2>سجل العمليات</h2>
         <div class="sub">آخر التعديلات الإدارية على النظام</div>
-        <div id="audit-list"></div>
+        <div id="audit-list" class="scroll-list"></div>
       </div>` : ''}
     </div>
   `;
@@ -953,23 +1008,36 @@ function renderManagerDashboard(isManager){
     });
   };
 
-  renderLeaveList(isManager);
+  renderLeaveList(perms.manageLeaves);
 
-  if(isManager){
-    document.getElementById('open-settings-btn').onclick = renderSettingsPage;
-    document.getElementById('manual-entry-btn').onclick = () => openManualEntryModal(employees);
-    document.getElementById('add-emp-btn').onclick = openAddEmployeeModal;
+  if(perms.manageSettings || perms.manageManagers){
+    const stgBtn = document.getElementById('open-settings-btn');
+    if(stgBtn) stgBtn.onclick = renderSettingsPage;
+  }
+  if(perms.manualEntry){
+    const meBtn = document.getElementById('manual-entry-btn');
+    if(meBtn) meBtn.onclick = () => openManualEntryModal(employees);
+  }
+  if(perms.addEmployees){
+    const addBtn = document.getElementById('add-emp-btn');
+    if(addBtn) addBtn.onclick = openAddEmployeeModal;
+  }
+  if(perms.editEmployees){
     app.querySelectorAll('[data-edit]').forEach(btn => {
       btn.onclick = () => openEditEmployeeModal(btn.getAttribute('data-edit'));
     });
+  }
+  if(perms.resetPasswords){
     app.querySelectorAll('[data-reset]').forEach(btn => {
       btn.onclick = () => openResetEmployeePasswordModal(btn.getAttribute('data-reset'));
     });
+  }
+  if(perms.removeEmployees){
     app.querySelectorAll('[data-remove]').forEach(btn => {
       btn.onclick = () => removeEmployee(btn.getAttribute('data-remove'));
     });
-    renderAuditList();
   }
+  if(perms.isManager) renderAuditList();
 
   const applyFilters = () => {
     const empId = document.getElementById('filter-emp').value;
@@ -993,6 +1061,7 @@ function renderManagerDashboard(isManager){
   document.getElementById('filter-search').oninput = applyFilters;
 }
 
+
 /* ============ Monthly dashboard (attendance / absence / lateness / deductions) ============ */
 function renderDashboardMonth(){
   const box = document.getElementById('dash-content');
@@ -1013,13 +1082,15 @@ function renderDashboardMonth(){
   if(dashSortKey){
     rows.sort((a,b) => (a.stats[dashSortKey] - b.stats[dashSortKey]) * dashSortDir);
   }
-  const totalWorkDays = rows.length ? rows[0].stats.workDaysCount : 0;
+  const totalWorkDays = countElapsedWorkDays(year, month-1);
   const totalWorkDaysFullMonth = countFullMonthWorkDays(year, month-1);
   const totalAbsences = rows.reduce((s,r)=> s + r.stats.absentDays, 0);
   const totalLate = rows.reduce((s,r)=> s + r.stats.lateCount, 0);
   const totalDeduction = rows.reduce((s,r)=> s + r.stats.deduction, 0);
-  const avgAttendanceRate = totalWorkDays > 0
-    ? Math.round((rows.reduce((s,r)=> s + r.stats.presentDays, 0) / (rows.length * totalWorkDays)) * 100)
+  const totalOvertimeMin = rows.reduce((s,r)=> s + r.stats.overtimeMinutesTotal, 0);
+  const totalOvertimePay = rows.reduce((s,r)=> s + r.stats.overtimePay, 0);
+  const avgAttendanceRate = rows.length > 0
+    ? Math.round((rows.reduce((s,r)=> s + (r.stats.workDaysCount > 0 ? r.stats.presentDays / r.stats.workDaysCount : 1), 0) / rows.length) * 100)
     : 0;
 
   const barsHtml = rows.map(r => {
@@ -1041,11 +1112,12 @@ function renderDashboardMonth(){
       <div class="stat-card"><div class="num">${avgAttendanceRate}%</div><div class="lbl">متوسط نسبة الحضور</div></div>
       <div class="stat-card"><div class="num">${totalAbsences}</div><div class="lbl">إجمالي أيام الغياب</div></div>
       <div class="stat-card"><div class="num">${totalLate}</div><div class="lbl">إجمالي مرات التأخير</div></div>
+      <div class="stat-card"><div class="num">${fmtMinutes(totalOvertimeMin)}</div><div class="lbl">إجمالي الوقت الإضافي</div></div>
     </div>
     <div style="margin-bottom:22px;">${barsHtml}</div>
     <table>
       <thead><tr>
-        <th>الموظف</th><th>الحضور (حتى الآن)</th><th class="sortable" data-sort="absentDays">أيام الغياب ⇅</th><th class="sortable" data-sort="lateCount">مرات التأخير ⇅</th><th class="sortable" data-sort="lateMinutesTotal">إجمالي وقت التأخير ⇅</th><th class="sortable" data-sort="deduction">الخصم المتوقع ⇅</th><th></th>
+        <th>الموظف</th><th>الحضور (حتى الآن)</th><th class="sortable" data-sort="absentDays">أيام الغياب ⇅</th><th class="sortable" data-sort="lateCount">مرات التأخير ⇅</th><th class="sortable" data-sort="lateMinutesTotal">إجمالي وقت التأخير ⇅</th><th class="sortable" data-sort="overtimeMinutesTotal">الوقت الإضافي ⇅</th><th class="sortable" data-sort="deduction">الخصم المتوقع ⇅</th><th>مستحق الإضافي</th><th></th>
       </tr></thead>
       <tbody>
         ${rows.map(r => `
@@ -1055,13 +1127,18 @@ function renderDashboardMonth(){
             <td>${r.stats.absentDays > 0 ? `<span class="type-tag out">${r.stats.absentDays}</span>` : '0'}</td>
             <td>${r.stats.lateCount > 0 ? `<span class="type-tag out">${r.stats.lateCount}</span>` : '0'}</td>
             <td class="mono">${fmtMinutes(r.stats.lateMinutesTotal)}</td>
+            <td class="mono">${r.stats.overtimeMinutesTotal > 0 ? `<span class="type-tag in">${fmtMinutes(r.stats.overtimeMinutesTotal)}</span>` : '—'}</td>
             <td class="mono">${r.stats.deduction > 0 ? `${r.stats.deduction.toFixed(2)} ${settings.currency}` : '—'}</td>
+            <td class="mono">${r.stats.overtimePay > 0 ? `${r.stats.overtimePay.toFixed(2)} ${settings.currency}` : '—'}</td>
             <td><button class="secondary-btn" style="padding:6px 10px; font-size:12px; width:auto;" data-detail="${r.emp.id}">التفاصيل</button></td>
           </tr>
         `).join('')}
         <tr style="font-weight:700;">
           <td>الإجمالي</td><td>—</td><td>${totalAbsences}</td><td>${totalLate}</td><td>—</td>
-          <td class="mono">${totalDeduction > 0 ? `${totalDeduction.toFixed(2)} ${settings.currency}` : '—'}</td><td></td>
+          <td class="mono">${fmtMinutes(totalOvertimeMin)}</td>
+          <td class="mono">${totalDeduction > 0 ? `${totalDeduction.toFixed(2)} ${settings.currency}` : '—'}</td>
+          <td class="mono">${totalOvertimePay > 0 ? `${totalOvertimePay.toFixed(2)} ${settings.currency}` : '—'}</td>
+          <td></td>
         </tr>
       </tbody>
     </table>
@@ -1088,12 +1165,12 @@ function exportMonthlyCsv(){
   if(employees.length === 0){ showToast('مفيش بيانات لتصديرها', true); return; }
 
   const rows = employees.map(e => ({ emp: e, stats: computeEmployeeMonth(e, year, month-1) }));
-  const header = ['الاسم','أيام العمل','أيام الحضور','أيام الغياب','مرات التأخير','إجمالي دقايق التأخير',`الخصم (${settings.currency})`];
+  const header = ['الاسم','أيام العمل','أيام الحضور','أيام الغياب','مرات التأخير','إجمالي دقايق التأخير','دقايق الوقت الإضافي',`الخصم (${settings.currency})`,`مستحق الإضافي (${settings.currency})`];
   const lines = [header.join(',')];
   rows.forEach(r => {
     lines.push([
       `"${r.emp.name}"`, r.stats.workDaysCount, r.stats.presentDays, r.stats.absentDays,
-      r.stats.lateCount, r.stats.lateMinutesTotal, r.stats.deduction.toFixed(2)
+      r.stats.lateCount, r.stats.lateMinutesTotal, r.stats.overtimeMinutesTotal, r.stats.deduction.toFixed(2), r.stats.overtimePay.toFixed(2)
     ].join(','));
   });
   const csv = '\uFEFF' + lines.join('\n');
@@ -1122,18 +1199,20 @@ function openEmployeeMonthDetail(empId, year, monthIdx){
   backdrop.innerHTML = `
     <div class="modal" style="max-width:480px; text-align:right;">
       <h3 style="text-align:center;">${emp.name}</h3>
-      <div class="sub" style="text-align:center;">تفاصيل شهر ${monthName} — ميعاده الرسمي ${emp.startTime || '09:00'}</div>
+      <div class="sub" style="text-align:center;">تفاصيل شهر ${monthName} — الحضور ${emp.startTime || settings.defaultStartTime || '09:00'} · الانصراف ${emp.endTime || settings.defaultEndTime || '17:00'}</div>
       <div style="max-height:340px; overflow-y:auto; margin-bottom:16px;">
         <table>
-          <thead><tr><th>اليوم</th><th>الحالة</th><th>وقت الحضور</th><th>التأخير</th></tr></thead>
+          <thead><tr><th>اليوم</th><th>الحالة</th><th>الحضور</th><th>التأخير</th><th>الانصراف</th><th>الإضافي</th></tr></thead>
           <tbody>
-            ${stats.days.length === 0 ? `<tr><td colspan="4" class="empty-row">لا يوجد بيانات بعد</td></tr>` :
+            ${stats.days.length === 0 ? `<tr><td colspan="6" class="empty-row">لا يوجد بيانات بعد</td></tr>` :
               stats.days.slice().reverse().map(d => `
                 <tr>
                   <td style="font-size:12px;">${dayLabel(d.date)}${d.label ? ` — ${d.label}` : ''}</td>
                   <td><span class="type-tag ${statusClass[d.status]}">${statusLabel[d.status]}</span></td>
                   <td class="mono" style="font-size:12px;">${d.ts ? fmtTime(d.ts) : '—'}</td>
                   <td class="mono" style="font-size:12px;">${d.lateMin ? fmtMinutes(d.lateMin) : '—'}</td>
+                  <td class="mono" style="font-size:12px;">${d.outTs ? fmtTime(d.outTs) : '—'}</td>
+                  <td class="mono" style="font-size:12px;">${d.overtimeMin ? fmtMinutes(d.overtimeMin) : '—'}</td>
                 </tr>
               `).join('')}
           </tbody>
@@ -1159,6 +1238,8 @@ function printEmployeeReport(emp, monthName, stats, statusLabel){
       <td>${statusLabel[d.status]}</td>
       <td>${d.ts ? fmtTime(d.ts) : '—'}</td>
       <td>${d.lateMin ? fmtMinutes(d.lateMin) : '—'}</td>
+      <td>${d.outTs ? fmtTime(d.outTs) : '—'}</td>
+      <td>${d.overtimeMin ? fmtMinutes(d.overtimeMin) : '—'}</td>
     </tr>`).join('');
   win.document.write(`
     <!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8">
@@ -1175,17 +1256,19 @@ function printEmployeeReport(emp, monthName, stats, statusLabel){
       .summary b{display:block; font-size:18px;}
     </style></head><body>
     <h1>${settings.companyName || 'ساعة الحضور'} — تقرير حضور</h1>
-    <div class="sub">${emp.name} — شهر ${monthName} — ميعاد الحضور الرسمي: ${emp.startTime || settings.defaultStartTime || '09:00'}</div>
+    <div class="sub">${emp.name} — شهر ${monthName} — الحضور: ${emp.startTime || settings.defaultStartTime || '09:00'} · الانصراف: ${emp.endTime || settings.defaultEndTime || '17:00'}</div>
     <div class="summary">
       <div>أيام الحضور<b>${stats.presentDays} / ${stats.workDaysCount}</b></div>
       <div>أيام الغياب<b>${stats.absentDays}</b></div>
       <div>مرات التأخير<b>${stats.lateCount}</b></div>
       <div>إجمالي وقت التأخير<b>${fmtMinutes(stats.lateMinutesTotal)}</b></div>
+      <div>إجمالي الوقت الإضافي<b>${fmtMinutes(stats.overtimeMinutesTotal)}</b></div>
       <div>الخصم المتوقع<b>${stats.deduction.toFixed(2)} ${settings.currency}</b></div>
+      <div>مستحق الوقت الإضافي<b>${stats.overtimePay.toFixed(2)} ${settings.currency}</b></div>
     </div>
     <table>
-      <thead><tr><th>اليوم</th><th>الحالة</th><th>وقت الحضور</th><th>التأخير</th></tr></thead>
-      <tbody>${rowsHtml || '<tr><td colspan="4">لا يوجد بيانات</td></tr>'}</tbody>
+      <thead><tr><th>اليوم</th><th>الحالة</th><th>وقت الحضور</th><th>التأخير</th><th>وقت الانصراف</th><th>الإضافي</th></tr></thead>
+      <tbody>${rowsHtml || '<tr><td colspan="6">لا يوجد بيانات</td></tr>'}</tbody>
     </table>
     <script>window.onload = () => { window.print(); };<\/script>
     </body></html>
@@ -1318,6 +1401,7 @@ function openAddEmployeeModal(){
       <div class="field"><label for="ne-user">اسم المستخدم</label><input id="ne-user" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="مثال: mohamed"></div>
       <div class="field"><label for="ne-pass">كلمة المرور</label><input id="ne-pass" type="text" placeholder="كلمة مرور مبدئية"></div>
       <div class="field"><label for="ne-start">ميعاد الحضور الرسمي</label><input id="ne-start" type="time" value="${settings.defaultStartTime || '09:00'}"></div>
+      <div class="field"><label for="ne-end">ميعاد الانصراف الرسمي</label><input id="ne-end" type="time" value="${settings.defaultEndTime || '17:00'}"></div>
       <div class="field">
         <label for="ne-dept">القسم</label>
         <select id="ne-dept">
@@ -1338,6 +1422,7 @@ function openAddEmployeeModal(){
     const username = document.getElementById('ne-user').value.trim();
     const password = document.getElementById('ne-pass').value;
     const startTime = document.getElementById('ne-start').value || settings.defaultStartTime || '09:00';
+    const endTime = document.getElementById('ne-end').value || settings.defaultEndTime || '17:00';
     const departmentId = document.getElementById('ne-dept').value;
     const errBox = document.getElementById('add-emp-error');
     if(!name || !username || !password){ errBox.innerHTML = `<div class="error-msg">من فضلك املأ كل الحقول</div>`; return; }
@@ -1345,7 +1430,7 @@ function openAddEmployeeModal(){
       errBox.innerHTML = `<div class="error-msg">اسم المستخدم ده مستخدم بالفعل</div>`; return;
     }
     try{
-      await usersCol.add({ username, password, name, role:'employee', startTime, departmentId });
+      await usersCol.add({ username, password, name, role:'employee', startTime, endTime, departmentId });
       backdrop.remove();
       showToast(`تمت إضافة ${name}`);
       logAction('إضافة موظف', name);
@@ -1367,6 +1452,8 @@ function openEditEmployeeModal(empId){
       <div class="sub" style="text-align:center;">${emp.name}</div>
       <div id="es-error"></div>
       <div class="field"><label for="es-time">ميعاد الحضور الرسمي</label><input id="es-time" type="time" value="${emp.startTime || settings.defaultStartTime || '09:00'}"></div>
+      <div class="field"><label for="es-end">ميعاد الانصراف الرسمي</label><input id="es-end" type="time" value="${emp.endTime || settings.defaultEndTime || '17:00'}"></div>
+      <div class="sub" id="es-hours-hint" style="margin-top:-10px;"></div>
       <div class="field">
         <label for="es-dept">القسم</label>
         <select id="es-dept">
@@ -1381,16 +1468,31 @@ function openEditEmployeeModal(empId){
     </div>
   `;
   document.body.appendChild(backdrop);
+  const updateHoursHint = () => {
+    const sVal = document.getElementById('es-time').value;
+    const eVal = document.getElementById('es-end').value;
+    const hint = document.getElementById('es-hours-hint');
+    if(!sVal || !eVal){ hint.textContent = ''; return; }
+    const [sh,sm] = sVal.split(':').map(Number);
+    const [eh,em] = eVal.split(':').map(Number);
+    let mins = (eh*60+em) - (sh*60+sm);
+    if(mins < 0) mins += 24*60;
+    hint.textContent = `عدد ساعات العمل الرسمية: ${fmtMinutes(mins)}`;
+  };
+  document.getElementById('es-time').oninput = updateHoursHint;
+  document.getElementById('es-end').oninput = updateHoursHint;
+  updateHoursHint();
   backdrop.querySelector('#es-cancel').onclick = () => backdrop.remove();
   backdrop.querySelector('#es-save').onclick = async () => {
     const newTime = document.getElementById('es-time').value;
+    const newEnd = document.getElementById('es-end').value;
     const newDept = document.getElementById('es-dept').value;
-    if(!newTime){ document.getElementById('es-error').innerHTML = `<div class="error-msg">اختار ميعاد صحيح</div>`; return; }
+    if(!newTime || !newEnd){ document.getElementById('es-error').innerHTML = `<div class="error-msg">اختار مواعيد صحيحة</div>`; return; }
     try{
-      await usersCol.doc(empId).update({ startTime: newTime, departmentId: newDept });
+      await usersCol.doc(empId).update({ startTime: newTime, endTime: newEnd, departmentId: newDept });
       backdrop.remove();
       showToast(`تم تحديث بيانات ${emp.name}`);
-      logAction('تعديل بيانات موظف', `${emp.name} — ميعاد: ${newTime}`);
+      logAction('تعديل بيانات موظف', `${emp.name} — من ${newTime} إلى ${newEnd}`);
     }catch(e){
       backdrop.remove();
       showToast('حصلت مشكلة أثناء الحفظ', true);
@@ -1442,7 +1544,7 @@ function openManualEntryModal(employees){
   const updatePreview = () => {
     const fromVal = document.getElementById('me-date-from').value;
     const toVal = document.getElementById('me-date-to').value;
-    const workOnly = document.getElementById('me-workdays-only').checked;
+    const workOnly = document.getElementById('me-workdays-only').checked && fromVal !== toVal;
     const preview = document.getElementById('me-preview');
     if(!fromVal || !toVal || toVal < fromVal){ preview.textContent = ''; return; }
     const dates = getDateRange(fromVal, toVal, workOnly);
@@ -1460,12 +1562,12 @@ function openManualEntryModal(employees){
     const fromVal = document.getElementById('me-date-from').value;
     const toVal = document.getElementById('me-date-to').value;
     const timeVal = document.getElementById('me-time').value;
-    const workOnly = document.getElementById('me-workdays-only').checked;
+    const workOnly = document.getElementById('me-workdays-only').checked && fromVal !== toVal;
     const errBox = document.getElementById('me-error');
     if(!empId || !fromVal || !toVal || !timeVal){ errBox.innerHTML = `<div class="error-msg">من فضلك املأ كل الحقول</div>`; return; }
     if(toVal < fromVal){ errBox.innerHTML = `<div class="error-msg">تاريخ النهاية لازم يكون بعد تاريخ البداية</div>`; return; }
     const dates = getDateRange(fromVal, toVal, workOnly);
-    if(dates.length === 0){ errBox.innerHTML = `<div class="error-msg">مفيش أيام شغل في المدى ده</div>`; return; }
+    if(dates.length === 0){ errBox.innerHTML = `<div class="error-msg">مفيش أيام شغل في المدى ده. جرب تشيل علامة "أيام الشغل بس" لو عايز تسجل في يوم عطلة</div>`; return; }
     if(dates.length > 300){ errBox.innerHTML = `<div class="error-msg">المدى كبير أوي (${dates.length} يوم). قسّمه لفترات أصغر من فضلك</div>`; return; }
     const emp = users.find(u => u.id === empId);
     const [hh,mm] = timeVal.split(':').map(Number);
@@ -1481,7 +1583,7 @@ function openManualEntryModal(employees){
       showToast(`تم تسجيل ${dates.length} ${type === 'in' ? 'حضور' : 'انصراف'} لـ${emp.name} يدويًا`);
       logAction('تسجيل يدوي متعدد الأيام', `${emp.name} — ${type === 'in' ? 'حضور' : 'انصراف'} — من ${fromVal} إلى ${toVal} (${dates.length} يوم)`);
     }catch(e){
-      errBox.innerHTML = `<div class="error-msg">حصلت مشكلة أثناء الحفظ</div>`;
+      errBox.innerHTML = `<div class="error-msg">حصلت مشكلة أثناء الحفظ: ${(e && e.message) ? e.message : 'خطأ غير معروف'}</div>`;
     }
   };
 }
@@ -1630,6 +1732,8 @@ function renderSettingsPage(){
   const app = document.getElementById('app');
   const wd = settings.workDays || [0,1,2,3,4,6];
   const supervisors = users.filter(u => u.role === 'supervisor');
+  const managers = users.filter(u => u.role === 'manager');
+  const perms = getPerms(currentUser);
 
   app.innerHTML = `
     <div class="dash">
@@ -1638,7 +1742,11 @@ function renderSettingsPage(){
           <h2>الإعدادات العامة</h2>
           <button class="secondary-btn" id="back-to-dash" style="width:auto; padding:10px 18px;">→ رجوع للداشبورد</button>
         </div>
+        ${!perms.manageSettings && !perms.manageManagers ? `<div class="empty-row">مفيش صلاحية عندك تدخل على أي إعدادات</div>` : ''}
+      </div>
 
+      ${perms.manageSettings ? `
+      <div class="panel">
         <h3 style="font-size:15px; margin-bottom:10px;">أيام العمل الرسمية</h3>
         <div style="display:flex; flex-wrap:wrap; gap:14px; margin-bottom:22px;">
           ${WEEKDAYS_AR.map(d => `
@@ -1648,12 +1756,14 @@ function renderSettingsPage(){
           `).join('')}
         </div>
 
-        <h3 style="font-size:15px; margin-bottom:10px;">الخصومات والميعاد الافتراضي</h3>
+        <h3 style="font-size:15px; margin-bottom:10px;">الخصومات والوقت الإضافي والمواعيد الافتراضية</h3>
         <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin-bottom:10px;">
           <div class="field"><label for="set-currency">وحدة العملة</label><input id="set-currency" type="text" value="${settings.currency || 'جنيه'}"></div>
           <div class="field"><label for="set-perday">خصم يوم الغياب</label><input id="set-perday" type="number" min="0" step="0.5" value="${settings.deductionPerDay || 0}"></div>
           <div class="field"><label for="set-permin">خصم دقيقة التأخير</label><input id="set-permin" type="number" min="0" step="0.1" value="${settings.deductionPerLateMinute || 0}"></div>
-          <div class="field"><label for="set-defstart">الميعاد الافتراضي لموظف جديد</label><input id="set-defstart" type="time" value="${settings.defaultStartTime || '09:00'}"></div>
+          <div class="field"><label for="set-otrate">أجر دقيقة الوقت الإضافي</label><input id="set-otrate" type="number" min="0" step="0.1" value="${settings.overtimeRatePerMinute || 0}"></div>
+          <div class="field"><label for="set-defstart">ميعاد الحضور الافتراضي لموظف جديد</label><input id="set-defstart" type="time" value="${settings.defaultStartTime || '09:00'}"></div>
+          <div class="field"><label for="set-defend">ميعاد الانصراف الافتراضي لموظف جديد</label><input id="set-defend" type="time" value="${settings.defaultEndTime || '17:00'}"></div>
           <div class="field"><label for="set-company">اسم الشركة (يظهر فوق)</label><input id="set-company" type="text" value="${settings.companyName || ''}" placeholder="ساعة الحضور"></div>
           <div class="field"><label for="set-logo">رابط شعار الشركة (اختياري)</label><input id="set-logo" type="text" value="${settings.logoUrl || ''}" placeholder="https://..."></div>
         </div>
@@ -1706,8 +1816,9 @@ function renderSettingsPage(){
               `).join('')}
           </tbody>
         </table>
-      </div>
+      </div>` : ''}
 
+      ${perms.manageManagers ? `
       <div class="panel">
         <div class="row-between" style="margin-bottom:6px;">
           <div>
@@ -1756,102 +1867,242 @@ function renderSettingsPage(){
           </tbody>
         </table>
       </div>
+
+      <div class="panel">
+        <h2 style="margin-bottom:2px;">تعيين مدير جديد</h2>
+        <div class="sub">اكتب اسم مستخدم موظف موجود بالفعل، واختار الصلاحيات اللي هيحصل عليها كمدير</div>
+        <div id="appoint-error"></div>
+        <div class="field"><label for="appoint-user">اسم المستخدم</label><input id="appoint-user" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="اسم مستخدم موجود بالفعل"></div>
+        <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px;">
+          ${PERMISSION_DEFS.map(p => `
+            <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; background:#fff; padding:8px 12px; border-radius:8px; border:1.5px solid var(--panel-line); max-width:260px;">
+              <input type="checkbox" class="appoint-perm" data-perm="${p.key}" checked> ${p.label}
+            </label>
+          `).join('')}
+        </div>
+        <button class="primary-btn" id="appoint-btn" style="width:auto; padding:12px 24px;">تعيين كمدير</button>
+
+        <h3 style="font-size:15px; margin:24px 0 10px;">المديرون الحاليون</h3>
+        <table>
+          <thead><tr><th>الاسم</th><th>اسم المستخدم</th><th>الصلاحيات</th><th></th></tr></thead>
+          <tbody>
+            ${managers.length === 0 ? `<tr><td colspan="4" class="empty-row">مفيش مديرين</td></tr>` :
+              managers.map(m => {
+                const mPerms = m.permissions ? m.permissions : FULL_PERMS;
+                const grantedCount = PERMISSION_DEFS.filter(p => mPerms[p.key]).length;
+                const isSelf = m.id === currentUser.id;
+                return `
+                <tr>
+                  <td>${m.name}${isSelf ? ' (إنت)' : ''}</td>
+                  <td class="mono">${m.username}</td>
+                  <td style="font-size:12px; color:var(--text-mute);">${m.permissions ? `${grantedCount} / ${PERMISSION_DEFS.length} صلاحية` : 'كل الصلاحيات (مدير أساسي)'}</td>
+                  <td style="white-space:nowrap;">
+                    ${!isSelf ? `<button class="secondary-btn" style="padding:6px 10px; font-size:12px; width:auto;" data-edit-perms="${m.id}">تعديل الصلاحيات</button>` : `<span class="sub" style="font-size:11px;">محدش غيرك يقدر يعدّل صلاحياتك</span>`}
+                    ${!isSelf ? `<button class="secondary-btn" style="padding:6px 10px; font-size:12px; width:auto; color:var(--danger); border-color:rgba(196,69,59,0.4) !important;" data-revoke-mgr="${m.id}">إلغاء صلاحية المدير</button>` : ''}
+                  </td>
+                </tr>`;
+              }).join('')}
+          </tbody>
+        </table>
+      </div>` : ''}
     </div>
   `;
 
   document.getElementById('back-to-dash').onclick = () => { currentView = 'dashboard'; route(); };
 
-  document.getElementById('save-settings-btn').onclick = async () => {
-    const checked = Array.from(app.querySelectorAll('[data-wd]')).filter(c => c.checked).map(c => Number(c.getAttribute('data-wd')));
-    if(checked.length === 0){ showToast('لازم يوم شغل واحد على الأقل', true); return; }
-    const newSettings = {
-      workDays: checked,
-      currency: document.getElementById('set-currency').value.trim() || 'جنيه',
-      deductionPerDay: Number(document.getElementById('set-perday').value) || 0,
-      deductionPerLateMinute: Number(document.getElementById('set-permin').value) || 0,
-      defaultStartTime: document.getElementById('set-defstart').value || '09:00',
-      companyName: document.getElementById('set-company').value.trim(),
-      logoUrl: document.getElementById('set-logo').value.trim(),
-      kioskMode: document.getElementById('set-kiosk').checked
+  if(perms.manageSettings){
+    document.getElementById('save-settings-btn').onclick = async () => {
+      const checked = Array.from(app.querySelectorAll('[data-wd]')).filter(c => c.checked).map(c => Number(c.getAttribute('data-wd')));
+      if(checked.length === 0){ showToast('لازم يوم شغل واحد على الأقل', true); return; }
+      const newSettings = {
+        workDays: checked,
+        currency: document.getElementById('set-currency').value.trim() || 'جنيه',
+        deductionPerDay: Number(document.getElementById('set-perday').value) || 0,
+        deductionPerLateMinute: Number(document.getElementById('set-permin').value) || 0,
+        overtimeRatePerMinute: Number(document.getElementById('set-otrate').value) || 0,
+        defaultStartTime: document.getElementById('set-defstart').value || '09:00',
+        defaultEndTime: document.getElementById('set-defend').value || '17:00',
+        companyName: document.getElementById('set-company').value.trim(),
+        logoUrl: document.getElementById('set-logo').value.trim(),
+        kioskMode: document.getElementById('set-kiosk').checked
+      };
+      try{
+        await settingsCol.doc('general').set(newSettings, {merge:true});
+        showToast('تم حفظ الإعدادات');
+        logAction('تعديل الإعدادات العامة', '');
+      }catch(e){
+        showToast('حصلت مشكلة أثناء الحفظ', true);
+      }
     };
+
+    document.getElementById('add-holiday-btn').onclick = async () => {
+      const date = document.getElementById('hol-date').value;
+      const name = document.getElementById('hol-name').value.trim();
+      if(!date || !name){ showToast('اكتب التاريخ والاسم', true); return; }
+      try{
+        await holidaysCol.add({ date, name });
+        showToast('تمت إضافة العطلة');
+        logAction('إضافة عطلة رسمية', `${name} (${date})`);
+      }catch(e){ showToast('حصلت مشكلة أثناء الحفظ', true); }
+    };
+    app.querySelectorAll('[data-del-hol]').forEach(btn => {
+      btn.onclick = async () => {
+        try{ await holidaysCol.doc(btn.getAttribute('data-del-hol')).delete(); showToast('تم حذف العطلة'); }
+        catch(e){ showToast('حصلت مشكلة أثناء الحذف', true); }
+      };
+    });
+
+    document.getElementById('add-dept-btn').onclick = async () => {
+      const name = document.getElementById('dept-name').value.trim();
+      if(!name){ showToast('اكتب اسم القسم', true); return; }
+      try{
+        await departmentsCol.add({ name });
+        showToast('تمت إضافة القسم');
+        logAction('إضافة قسم', name);
+      }catch(e){ showToast('حصلت مشكلة أثناء الحفظ', true); }
+    };
+    app.querySelectorAll('[data-del-dept]').forEach(btn => {
+      btn.onclick = async () => {
+        try{ await departmentsCol.doc(btn.getAttribute('data-del-dept')).delete(); showToast('تم حذف القسم'); }
+        catch(e){ showToast('حصلت مشكلة أثناء الحذف', true); }
+      };
+    });
+  }
+
+  if(perms.manageManagers){
+    document.getElementById('add-sup-btn').onclick = async () => {
+      const name = document.getElementById('sup-name').value.trim();
+      const username = document.getElementById('sup-user').value.trim();
+      const password = document.getElementById('sup-pass').value;
+      const errBox = document.getElementById('add-sup-error');
+      if(!name || !username || !password){ errBox.innerHTML = `<div class="error-msg">من فضلك املأ كل الحقول</div>`; return; }
+      if(users.some(u => u.username.toLowerCase() === username.toLowerCase())){
+        errBox.innerHTML = `<div class="error-msg">اسم المستخدم ده مستخدم بالفعل</div>`; return;
+      }
+      try{
+        await usersCol.add({ username, password, name, role:'supervisor' });
+        showToast(`تمت إضافة المشرف ${name}`);
+        logAction('إضافة مشرف', name);
+      }catch(e){ errBox.innerHTML = `<div class="error-msg">حصلت مشكلة أثناء الحفظ</div>`; }
+    };
+    app.querySelectorAll('[data-del-sup]').forEach(btn => {
+      btn.onclick = async () => {
+        try{ await usersCol.doc(btn.getAttribute('data-del-sup')).delete(); showToast('تم حذف المشرف'); }
+        catch(e){ showToast('حصلت مشكلة أثناء الحذف', true); }
+      };
+    });
+
+    document.getElementById('create-invite-btn').onclick = async () => {
+      const code = Array.from({length:6}, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random()*33)]).join('');
+      try{
+        await invitesCol.add({ code, createdBy: currentUser.name, createdAt: Date.now(), used:false });
+        showToast(`تم إنشاء الكود: ${code}`);
+        logAction('إنشاء كود دعوة', code);
+      }catch(e){ showToast('حصلت مشكلة أثناء الحفظ', true); }
+    };
+    app.querySelectorAll('[data-del-invite]').forEach(btn => {
+      btn.onclick = async () => {
+        try{ await invitesCol.doc(btn.getAttribute('data-del-invite')).delete(); showToast('تم حذف الكود'); }
+        catch(e){ showToast('حصلت مشكلة أثناء الحذف', true); }
+      };
+    });
+
+    document.getElementById('appoint-btn').onclick = async () => {
+      const username = document.getElementById('appoint-user').value.trim();
+      const errBox = document.getElementById('appoint-error');
+      if(!username){ errBox.innerHTML = `<div class="error-msg">اكتب اسم المستخدم</div>`; return; }
+      const target = users.find(u => u.username.toLowerCase() === username.toLowerCase());
+      if(!target){ errBox.innerHTML = `<div class="error-msg">مفيش حساب بالاسم ده. لازم يكون عنده حساب موظف الأول (تقدر تضيفه أو تبعتله دعوة)</div>`; return; }
+      if(target.role === 'manager'){ errBox.innerHTML = `<div class="error-msg">الشخص ده مدير بالفعل</div>`; return; }
+      const selectedPerms = {};
+      app.querySelectorAll('.appoint-perm').forEach(cb => { selectedPerms[cb.getAttribute('data-perm')] = cb.checked; });
+      try{
+        await usersCol.doc(target.id).update({ role:'manager', permissions: selectedPerms, departmentId: firebase.firestore.FieldValue.delete(), startTime: firebase.firestore.FieldValue.delete() });
+        showToast(`تم تعيين ${target.name} كمدير`);
+        logAction('تعيين مدير جديد', target.name);
+        document.getElementById('appoint-user').value = '';
+      }catch(e){ errBox.innerHTML = `<div class="error-msg">حصلت مشكلة أثناء التعيين</div>`; }
+    };
+
+    app.querySelectorAll('[data-edit-perms]').forEach(btn => {
+      btn.onclick = () => openEditManagerPermsModal(btn.getAttribute('data-edit-perms'));
+    });
+    app.querySelectorAll('[data-revoke-mgr]').forEach(btn => {
+      btn.onclick = () => revokeManager(btn.getAttribute('data-revoke-mgr'));
+    });
+  }
+}
+
+/* ============ Manager permission management ============ */
+function openEditManagerPermsModal(mgrId){
+  const mgr = users.find(u => u.id === mgrId);
+  if(!mgr) return;
+  if(mgrId === currentUser.id){ showToast('مينفعش تعدّل صلاحياتك انت نفسك', true); return; }
+  const currentPerms = mgr.permissions ? mgr.permissions : FULL_PERMS;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal" style="text-align:right; max-width:420px;">
+      <h3 style="text-align:center;">صلاحيات ${mgr.name}</h3>
+      <div id="ep-error"></div>
+      <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px;">
+        ${PERMISSION_DEFS.map(p => `
+          <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; background:#fff; padding:8px 12px; border-radius:8px; border:1.5px solid var(--panel-line); max-width:260px;">
+            <input type="checkbox" class="edit-perm" data-perm="${p.key}" ${currentPerms[p.key] ? 'checked' : ''}> ${p.label}
+          </label>
+        `).join('')}
+      </div>
+      <div class="modal-actions">
+        <button class="secondary-btn" id="ep-cancel">إلغاء</button>
+        <button class="primary-btn" id="ep-save">حفظ الصلاحيات</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.querySelector('#ep-cancel').onclick = () => backdrop.remove();
+  backdrop.querySelector('#ep-save').onclick = async () => {
+    const newPerms = {};
+    backdrop.querySelectorAll('.edit-perm').forEach(cb => { newPerms[cb.getAttribute('data-perm')] = cb.checked; });
     try{
-      await settingsCol.doc('general').set(newSettings, {merge:true});
-      showToast('تم حفظ الإعدادات');
-      logAction('تعديل الإعدادات العامة', '');
+      await usersCol.doc(mgrId).update({ permissions: newPerms });
+      backdrop.remove();
+      showToast(`تم تحديث صلاحيات ${mgr.name}`);
+      logAction('تعديل صلاحيات مدير', mgr.name);
     }catch(e){
+      document.getElementById('ep-error').innerHTML = `<div class="error-msg">حصلت مشكلة أثناء الحفظ</div>`;
+    }
+  };
+}
+
+function revokeManager(mgrId){
+  const mgr = users.find(u => u.id === mgrId);
+  if(!mgr) return;
+  if(mgrId === currentUser.id){ showToast('مينفعش تلغي صلاحيتك أنت', true); return; }
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal">
+      <h3>تأكيد إلغاء صلاحية المدير</h3>
+      <div class="sub">هيرجع <b>${mgr.name}</b> حساب موظف عادي، ومش هيقدر يدخل على أي حاجة إدارية تاني.</div>
+      <div class="modal-actions">
+        <button class="secondary-btn" id="rv-cancel">إلغاء</button>
+        <button class="primary-btn" id="rv-confirm" style="background:var(--danger);">تأكيد الإلغاء</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.querySelector('#rv-cancel').onclick = () => backdrop.remove();
+  backdrop.querySelector('#rv-confirm').onclick = async () => {
+    try{
+      await usersCol.doc(mgrId).update({ role:'employee', permissions: firebase.firestore.FieldValue.delete(), startTime: settings.defaultStartTime || '09:00', endTime: settings.defaultEndTime || '17:00' });
+      backdrop.remove();
+      showToast(`تم إلغاء صلاحية المدير عن ${mgr.name}`);
+      logAction('إلغاء صلاحية مدير', mgr.name);
+    }catch(e){
+      backdrop.remove();
       showToast('حصلت مشكلة أثناء الحفظ', true);
     }
   };
-
-  document.getElementById('add-holiday-btn').onclick = async () => {
-    const date = document.getElementById('hol-date').value;
-    const name = document.getElementById('hol-name').value.trim();
-    if(!date || !name){ showToast('اكتب التاريخ والاسم', true); return; }
-    try{
-      await holidaysCol.add({ date, name });
-      showToast('تمت إضافة العطلة');
-      logAction('إضافة عطلة رسمية', `${name} (${date})`);
-    }catch(e){ showToast('حصلت مشكلة أثناء الحفظ', true); }
-  };
-  app.querySelectorAll('[data-del-hol]').forEach(btn => {
-    btn.onclick = async () => {
-      try{ await holidaysCol.doc(btn.getAttribute('data-del-hol')).delete(); showToast('تم حذف العطلة'); }
-      catch(e){ showToast('حصلت مشكلة أثناء الحذف', true); }
-    };
-  });
-
-  document.getElementById('add-dept-btn').onclick = async () => {
-    const name = document.getElementById('dept-name').value.trim();
-    if(!name){ showToast('اكتب اسم القسم', true); return; }
-    try{
-      await departmentsCol.add({ name });
-      showToast('تمت إضافة القسم');
-      logAction('إضافة قسم', name);
-    }catch(e){ showToast('حصلت مشكلة أثناء الحفظ', true); }
-  };
-  app.querySelectorAll('[data-del-dept]').forEach(btn => {
-    btn.onclick = async () => {
-      try{ await departmentsCol.doc(btn.getAttribute('data-del-dept')).delete(); showToast('تم حذف القسم'); }
-      catch(e){ showToast('حصلت مشكلة أثناء الحذف', true); }
-    };
-  });
-
-  document.getElementById('add-sup-btn').onclick = async () => {
-    const name = document.getElementById('sup-name').value.trim();
-    const username = document.getElementById('sup-user').value.trim();
-    const password = document.getElementById('sup-pass').value;
-    const errBox = document.getElementById('add-sup-error');
-    if(!name || !username || !password){ errBox.innerHTML = `<div class="error-msg">من فضلك املأ كل الحقول</div>`; return; }
-    if(users.some(u => u.username.toLowerCase() === username.toLowerCase())){
-      errBox.innerHTML = `<div class="error-msg">اسم المستخدم ده مستخدم بالفعل</div>`; return;
-    }
-    try{
-      await usersCol.add({ username, password, name, role:'supervisor' });
-      showToast(`تمت إضافة المشرف ${name}`);
-      logAction('إضافة مشرف', name);
-    }catch(e){ errBox.innerHTML = `<div class="error-msg">حصلت مشكلة أثناء الحفظ</div>`; }
-  };
-  app.querySelectorAll('[data-del-sup]').forEach(btn => {
-    btn.onclick = async () => {
-      try{ await usersCol.doc(btn.getAttribute('data-del-sup')).delete(); showToast('تم حذف المشرف'); }
-      catch(e){ showToast('حصلت مشكلة أثناء الحذف', true); }
-    };
-  });
-
-  document.getElementById('create-invite-btn').onclick = async () => {
-    const code = Array.from({length:6}, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random()*33)]).join('');
-    try{
-      await invitesCol.add({ code, createdBy: currentUser.name, createdAt: Date.now(), used:false });
-      showToast(`تم إنشاء الكود: ${code}`);
-      logAction('إنشاء كود دعوة', code);
-    }catch(e){ showToast('حصلت مشكلة أثناء الحفظ', true); }
-  };
-  app.querySelectorAll('[data-del-invite]').forEach(btn => {
-    btn.onclick = async () => {
-      try{ await invitesCol.doc(btn.getAttribute('data-del-invite')).delete(); showToast('تم حذف الكود'); }
-      catch(e){ showToast('حصلت مشكلة أثناء الحذف', true); }
-    };
-  });
 }
 
 /* ============ Boot: seed + live sync ============ */
