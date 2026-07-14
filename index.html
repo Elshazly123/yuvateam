@@ -274,6 +274,7 @@ const departmentsCol = db.collection('departments');
 const leaveCol = db.collection('leaveRequests');
 const auditCol = db.collection('auditLog');
 const invitesCol = db.collection('invites');
+const branchesCol = db.collection('branches');
 
 /* ============ App state ============ */
 let users = [];
@@ -285,7 +286,8 @@ let dashboardMonth = (() => {
   const n = new Date();
   return n.getFullYear() + '-' + String(n.getMonth()+1).padStart(2,'0');
 })();
-let settings = { workDays:[0,1,2,3,4,6], deductionPerDay:0, deductionPerLateMinute:0, currency:'جنيه', defaultStartTime:'09:00', defaultEndTime:'17:00', overtimeRatePerMinute:0 };
+let settings = { workDays:[0,1,2,3,4,6], deductionPerDay:0, deductionPerLateMinute:0, currency:'جنيه', defaultStartTime:'09:00', defaultEndTime:'17:00', overtimeRatePerMinute:0, locationEnabled:false };
+let branches = [];
 let holidays = [];
 let departments = [];
 let leaveRequests = [];
@@ -304,6 +306,15 @@ function todayKey(ts){ const d = new Date(ts); return d.getFullYear()+'-'+d.getM
 
 /* ============ Work schedule (configurable via Settings) ============ */
 function isWorkDay(date){ const wd = settings.workDays || [0,1,2,3,4,6]; return wd.includes(date.getDay()); }
+function distanceMeters(lat1, lng1, lat2, lng2){
+  const R = 6371000; // Earth radius in meters
+  const toRad = (d) => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+}
 function dateKeyYMD(date){
   return date.getFullYear() + '-' + String(date.getMonth()+1).padStart(2,'0') + '-' + String(date.getDate()).padStart(2,'0');
 }
@@ -747,33 +758,66 @@ function openPunchModal(type){
   document.body.appendChild(backdrop);
 
   let coords = null;
+  let withinRange = null; // null = not yet checked, true/false once known
+  const candidateBranches = currentUser.branchId
+    ? branches.filter(b => b.id === currentUser.branchId)
+    : branches;
+  const geoRestricted = !!(settings.locationEnabled && candidateBranches.length > 0);
   const locRow = backdrop.querySelector('#loc-row');
+
+  const handleCoords = (pos) => {
+    coords = {lat: pos.coords.latitude.toFixed(5), lng: pos.coords.longitude.toFixed(5)};
+    if(geoRestricted){
+      let nearest = null;
+      candidateBranches.forEach(b => {
+        const dist = distanceMeters(pos.coords.latitude, pos.coords.longitude, b.lat, b.lng);
+        if(!nearest || dist < nearest.dist) nearest = {branch:b, dist};
+      });
+      withinRange = nearest.dist <= nearest.branch.radiusMeters;
+      if(withinRange){
+        locRow.textContent = `📍 داخل نطاق ${nearest.branch.name} (${Math.round(nearest.dist)} م)`;
+        locRow.className = 'loc-row ok';
+      } else {
+        locRow.textContent = `📍 برّه نطاق ${nearest.branch.name} (بعيد ${Math.round(nearest.dist)} م، المسموح ${nearest.branch.radiusMeters} م)`;
+        locRow.className = 'loc-row bad';
+      }
+    } else {
+      locRow.textContent = `📍 تم تحديد الموقع (${coords.lat}, ${coords.lng})`;
+      locRow.className = 'loc-row ok';
+    }
+  };
+  const handleGeoError = () => {
+    if(geoRestricted){
+      withinRange = false;
+      locRow.textContent = '📍 لازم تسمح بالوصول للموقع عشان تقدر تسجل من هنا';
+    } else {
+      locRow.textContent = '📍 تعذّر الوصول للموقع — هيتسجل بدون إحداثيات';
+    }
+    locRow.className = 'loc-row bad';
+  };
 
   if('geolocation' in navigator){
     try{
-      navigator.geolocation.getCurrentPosition(
-        pos => {
-          coords = {lat: pos.coords.latitude.toFixed(5), lng: pos.coords.longitude.toFixed(5)};
-          locRow.textContent = `📍 تم تحديد الموقع (${coords.lat}, ${coords.lng})`;
-          locRow.className = 'loc-row ok';
-        },
-        err => {
-          locRow.textContent = '📍 تعذّر الوصول للموقع — هيتسجل بدون إحداثيات';
-          locRow.className = 'loc-row bad';
-        },
-        {timeout:8000}
-      );
+      navigator.geolocation.getCurrentPosition(handleCoords, handleGeoError, {timeout:8000});
     }catch(e){
-      locRow.textContent = '📍 الموقع غير متاح هنا — هيتسجل بدون إحداثيات';
-      locRow.className = 'loc-row bad';
+      handleGeoError();
     }
   } else {
-    locRow.textContent = '📍 الموقع غير مدعوم على هذا الجهاز';
+    if(geoRestricted) withinRange = false;
+    locRow.textContent = geoRestricted ? '📍 الموقع غير مدعوم على هذا الجهاز، مينفعش تسجل من غيره' : '📍 الموقع غير مدعوم على هذا الجهاز';
     locRow.className = 'loc-row bad';
   }
 
   backdrop.querySelector('#cancel-punch').onclick = () => backdrop.remove();
   backdrop.querySelector('#confirm-punch').onclick = (e) => {
+    if(geoRestricted && withinRange === null){
+      showToast('لسه بيتحدد موقعك، استنى ثانية وجرب تاني', true);
+      return;
+    }
+    if(geoRestricted && withinRange === false){
+      showToast('التسجيل مسموح بس من موقع الشركة المحدد', true);
+      return;
+    }
     const btn = e.currentTarget;
     btn.disabled = true;
     backdrop.querySelector('#cancel-punch').disabled = true;
@@ -849,9 +893,12 @@ function renderManagerDashboard(perms){
   const app = document.getElementById('app');
   const employees = users.filter(u => u.role === 'employee' && !pendingDeleteIds.has(u.id));
   const todayStr = todayKey(Date.now());
-  const presentToday = new Set(
-    attendance.filter(r => todayKey(r.ts) === todayStr && r.type === 'in').map(r => r.userId)
-  );
+  const todayStatus = new Map(); // employeeId -> 'in' | 'out' | null
+  employees.forEach(e => {
+    const todayRecs = attendance.filter(r => r.userId === e.id && todayKey(r.ts) === todayStr).sort((a,b)=> b.ts - a.ts);
+    todayStatus.set(e.id, todayRecs.length ? todayRecs[0].type : null);
+  });
+  const presentToday = new Set(Array.from(todayStatus.entries()).filter(([id,st]) => st === 'in').map(([id]) => id));
   const deptName = (id) => { const d = departments.find(x => x.id === id); return d ? d.name : '—'; };
   const pendingLeaves = leaveRequests.filter(l => l.status === 'pending').sort((a,b)=> b.requestedAt - a.requestedAt);
 
@@ -876,8 +923,9 @@ function renderManagerDashboard(perms){
         <div class="row-between" style="margin-bottom:${perms.isManager ? '16px':'0'};">
           <div class="stat-row" style="margin:0; flex:1;">
             <div class="stat-card"><div class="num">${employees.length}</div><div class="lbl">إجمالي الموظفين</div></div>
-            <div class="stat-card"><div class="num">${presentToday.size}</div><div class="lbl">حضروا النهاردة</div></div>
-            <div class="stat-card"><div class="num">${Math.max(employees.length - presentToday.size, 0)}</div><div class="lbl">لسه ما حضرش</div></div>
+            <div class="stat-card"><div class="num">${presentToday.size}</div><div class="lbl">داخل العمل حاليًا</div></div>
+            <div class="stat-card"><div class="num">${Array.from(todayStatus.values()).filter(s => s === 'out').length}</div><div class="lbl">انصرفوا النهاردة</div></div>
+            <div class="stat-card"><div class="num">${Array.from(todayStatus.values()).filter(s => s === null).length}</div><div class="lbl">لسه ما حضرش خالص</div></div>
             <div class="stat-card"><div class="num">${pendingLeaves.length}</div><div class="lbl">طلبات إجازة معلقة</div></div>
           </div>
         </div>
@@ -938,25 +986,31 @@ function renderManagerDashboard(perms){
         </div>
         <input type="text" id="emp-search" class="search-box" placeholder="🔍 بحث بالاسم أو اسم المستخدم..." style="margin-bottom:14px; padding:10px 13px; border-radius:9px; border:1.5px solid var(--panel-line); font-size:13px; font-family:inherit;">
         <table>
-          <thead><tr><th>الاسم</th><th>اسم المستخدم</th><th>القسم</th><th>الحالة اليوم</th>${perms.isManager ? '<th>إجراءات</th>' : ''}</tr></thead>
+          <thead><tr><th>الاسم</th><th>اسم المستخدم</th><th>القسم</th><th>الفرع</th><th>الحالة اليوم</th>${perms.isManager ? '<th>إجراءات</th>' : ''}</tr></thead>
           <tbody id="emp-tbody">
-            ${employees.length === 0 ? `<tr><td colspan="${perms.isManager ? 5 : 4}" class="empty-row">مفيش موظفين مضافين لسه</td></tr>` :
-              employees.map(e => `
+            ${employees.length === 0 ? `<tr><td colspan="${perms.isManager ? 6 : 5}" class="empty-row">مفيش موظفين مضافين لسه</td></tr>` :
+              employees.map(e => {
+                const st = todayStatus.get(e.id);
+                const pill = st === 'in'
+                  ? `<span class="status-pill in"><span class="status-dot"></span>حاضر</span>`
+                  : st === 'out'
+                  ? `<span class="status-pill out"><span class="status-dot"></span>انصرف</span>`
+                  : `<span class="status-pill out"><span class="status-dot"></span>غير مسجل</span>`;
+                return `
                 <tr data-name="${e.name.toLowerCase()} ${e.username.toLowerCase()}">
                   <td>${e.name}</td>
                   <td class="mono">${e.username}</td>
                   <td>${deptName(e.departmentId)}</td>
-                  <td><span class="status-pill ${presentToday.has(e.id) ? 'in' : 'out'}">
-                    <span class="status-dot"></span>${presentToday.has(e.id) ? 'حاضر' : 'غير مسجل'}
-                  </span></td>
+                  <td>${e.branchId ? (branches.find(b => b.id === e.branchId)?.name || '—') : 'أي فرع'}</td>
+                  <td>${pill}</td>
                   ${perms.isManager ? `
                   <td style="white-space:nowrap;">
                     ${perms.editEmployees ? `<button class="secondary-btn" style="padding:6px 10px; font-size:12px; width:auto; display:inline-block;" data-edit="${e.id}">بيانات الموظف</button>` : ''}
                     ${perms.resetPasswords ? `<button class="secondary-btn" style="padding:6px 10px; font-size:12px; width:auto; display:inline-block;" data-reset="${e.id}">تغيير الباسورد</button>` : ''}
                     ${perms.removeEmployees ? `<button class="secondary-btn" style="padding:6px 10px; font-size:12px; width:auto; display:inline-block; color:var(--danger); border-color:rgba(196,69,59,0.4) !important;" data-remove="${e.id}">حذف</button>` : ''}
                   </td>` : ''}
-                </tr>
-              `).join('')}
+                </tr>`;
+              }).join('')}
           </tbody>
         </table>
       </div>
@@ -1409,6 +1463,13 @@ function openAddEmployeeModal(){
           ${departments.map(d => `<option value="${d.id}">${d.name}</option>`).join('')}
         </select>
       </div>
+      <div class="field">
+        <label for="ne-branch">الفرع (لو موقع الحضور مقيّد)</label>
+        <select id="ne-branch">
+          <option value="">أي فرع من فروع الشركة</option>
+          ${branches.map(b => `<option value="${b.id}">${b.name}</option>`).join('')}
+        </select>
+      </div>
       <div class="modal-actions">
         <button class="secondary-btn" id="cancel-add">إلغاء</button>
         <button class="primary-btn" id="save-add">حفظ الموظف</button>
@@ -1424,13 +1485,14 @@ function openAddEmployeeModal(){
     const startTime = document.getElementById('ne-start').value || settings.defaultStartTime || '09:00';
     const endTime = document.getElementById('ne-end').value || settings.defaultEndTime || '17:00';
     const departmentId = document.getElementById('ne-dept').value;
+    const branchId = document.getElementById('ne-branch').value;
     const errBox = document.getElementById('add-emp-error');
     if(!name || !username || !password){ errBox.innerHTML = `<div class="error-msg">من فضلك املأ كل الحقول</div>`; return; }
     if(users.some(u => u.username.toLowerCase() === username.toLowerCase())){
       errBox.innerHTML = `<div class="error-msg">اسم المستخدم ده مستخدم بالفعل</div>`; return;
     }
     try{
-      await usersCol.add({ username, password, name, role:'employee', startTime, endTime, departmentId });
+      await usersCol.add({ username, password, name, role:'employee', startTime, endTime, departmentId, branchId });
       backdrop.remove();
       showToast(`تمت إضافة ${name}`);
       logAction('إضافة موظف', name);
@@ -1461,6 +1523,13 @@ function openEditEmployeeModal(empId){
           ${departments.map(d => `<option value="${d.id}" ${emp.departmentId === d.id ? 'selected' : ''}>${d.name}</option>`).join('')}
         </select>
       </div>
+      <div class="field">
+        <label for="es-branch">الفرع (لو موقع الحضور مقيّد)</label>
+        <select id="es-branch">
+          <option value="">أي فرع من فروع الشركة</option>
+          ${branches.map(b => `<option value="${b.id}" ${emp.branchId === b.id ? 'selected' : ''}>${b.name}</option>`).join('')}
+        </select>
+      </div>
       <div class="modal-actions">
         <button class="secondary-btn" id="es-cancel">إلغاء</button>
         <button class="primary-btn" id="es-save">حفظ</button>
@@ -1487,9 +1556,10 @@ function openEditEmployeeModal(empId){
     const newTime = document.getElementById('es-time').value;
     const newEnd = document.getElementById('es-end').value;
     const newDept = document.getElementById('es-dept').value;
+    const newBranch = document.getElementById('es-branch').value;
     if(!newTime || !newEnd){ document.getElementById('es-error').innerHTML = `<div class="error-msg">اختار مواعيد صحيحة</div>`; return; }
     try{
-      await usersCol.doc(empId).update({ startTime: newTime, endTime: newEnd, departmentId: newDept });
+      await usersCol.doc(empId).update({ startTime: newTime, endTime: newEnd, departmentId: newDept, branchId: newBranch });
       backdrop.remove();
       showToast(`تم تحديث بيانات ${emp.name}`);
       logAction('تعديل بيانات موظف', `${emp.name} — من ${newTime} إلى ${newEnd}`);
@@ -1771,7 +1841,44 @@ function renderSettingsPage(){
           <input type="checkbox" id="set-kiosk" ${settings.kioskMode ? 'checked' : ''}>
           وضع الجهاز المشترك (Kiosk) — بعد أي تسجيل حضور/انصراف يرجع لشاشة الدخول تلقائيًا
         </label>
+
+        <label style="display:flex; align-items:center; gap:8px; font-size:13px; background:#fff; padding:10px 14px; border-radius:8px; border:1.5px solid var(--panel-line); width:fit-content; margin-bottom:8px;">
+          <input type="checkbox" id="set-loc-enabled" ${settings.locationEnabled ? 'checked' : ''}>
+          محدش يقدر يسجل حضور/انصراف إلا وهو داخل نطاق أحد فروع الشركة (حدد الفروع تحت 👇)
+        </label>
+        <div class="sub" style="margin-top:-2px;">⚠️ ده رادع كويس، لكن ممكن يتحايل عليه بتطبيقات تزييف الموقع (Fake GPS) على بعض الأجهزة.</div>
         <button class="primary-btn" id="save-settings-btn" style="width:auto; padding:12px 24px;">حفظ الإعدادات</button>
+      </div>
+
+      <div class="panel">
+        <h2 style="margin-bottom:2px;">فروع الشركة</h2>
+        <div class="sub">لو عندك أكتر من فرع، ضيفهم هنا. أي موظف تحدد له فرع معيّن هيتقيد بيه بس، ولو مش محدد له فرع هيقبل التسجيل من أي فرع منهم</div>
+        <div id="branch-error"></div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; margin-bottom:10px;">
+          <div class="field"><label for="br-name">اسم الفرع</label><input id="br-name" type="text" placeholder="مثال: فرع مدينة نصر"></div>
+          <div class="field"><label for="br-lat">خط العرض (Latitude)</label><input id="br-lat" type="text" placeholder="مثال: 30.0444"></div>
+          <div class="field"><label for="br-lng">خط الطول (Longitude)</label><input id="br-lng" type="text" placeholder="مثال: 31.2357"></div>
+          <div class="field"><label for="br-radius">نطاق السماح (متر)</label><input id="br-radius" type="number" min="10" step="10" value="150"></div>
+        </div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+          <button class="secondary-btn" id="capture-loc-btn" style="width:auto; padding:10px 18px;">📍 استخدم موقعي الحالي (وانت واقف في الفرع)</button>
+          <button class="primary-btn" id="add-branch-btn" style="width:auto; padding:10px 20px;">+ إضافة الفرع</button>
+        </div>
+        <div id="capture-loc-status" class="sub" style="margin-bottom:14px;"></div>
+        <table>
+          <thead><tr><th>اسم الفرع</th><th>الإحداثيات</th><th>النطاق</th><th></th></tr></thead>
+          <tbody>
+            ${branches.length === 0 ? `<tr><td colspan="4" class="empty-row">مفيش فروع مضافة لسه</td></tr>` :
+              branches.map(b => `
+                <tr>
+                  <td>${b.name}</td>
+                  <td class="mono" style="font-size:11.5px;">${b.lat}, ${b.lng}</td>
+                  <td class="mono">${b.radiusMeters} م</td>
+                  <td><button class="secondary-btn" style="padding:5px 10px; font-size:12px; width:auto; color:var(--danger); border-color:rgba(196,69,59,0.4) !important;" data-del-branch="${b.id}">حذف</button></td>
+                </tr>
+              `).join('')}
+          </tbody>
+        </table>
       </div>
 
       <div class="panel">
@@ -1914,6 +2021,11 @@ function renderSettingsPage(){
     document.getElementById('save-settings-btn').onclick = async () => {
       const checked = Array.from(app.querySelectorAll('[data-wd]')).filter(c => c.checked).map(c => Number(c.getAttribute('data-wd')));
       if(checked.length === 0){ showToast('لازم يوم شغل واحد على الأقل', true); return; }
+      const locEnabled = document.getElementById('set-loc-enabled').checked;
+      if(locEnabled && branches.length === 0){
+        showToast('لازم تضيف فرع واحد على الأقل تحت قبل ما تفعّل تقييد الموقع', true);
+        return;
+      }
       const newSettings = {
         workDays: checked,
         currency: document.getElementById('set-currency').value.trim() || 'جنيه',
@@ -1924,7 +2036,8 @@ function renderSettingsPage(){
         defaultEndTime: document.getElementById('set-defend').value || '17:00',
         companyName: document.getElementById('set-company').value.trim(),
         logoUrl: document.getElementById('set-logo').value.trim(),
-        kioskMode: document.getElementById('set-kiosk').checked
+        kioskMode: document.getElementById('set-kiosk').checked,
+        locationEnabled: locEnabled
       };
       try{
         await settingsCol.doc('general').set(newSettings, {merge:true});
@@ -1934,6 +2047,48 @@ function renderSettingsPage(){
         showToast('حصلت مشكلة أثناء الحفظ', true);
       }
     };
+
+    document.getElementById('capture-loc-btn').onclick = () => {
+      const statusEl = document.getElementById('capture-loc-status');
+      if(!('geolocation' in navigator)){ statusEl.textContent = 'الموقع غير مدعوم على هذا الجهاز'; return; }
+      statusEl.textContent = 'جاري تحديد موقعك...';
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          document.getElementById('br-lat').value = pos.coords.latitude.toFixed(6);
+          document.getElementById('br-lng').value = pos.coords.longitude.toFixed(6);
+          statusEl.textContent = '✅ تم تحديد الموقع. اكتب اسم الفرع وحدد النطاق ودوس "إضافة الفرع".';
+        },
+        () => { statusEl.textContent = 'تعذر الوصول لموقعك. اسمح للمتصفح بالوصول للموقع وجرب تاني.'; },
+        {timeout:8000}
+      );
+    };
+
+    document.getElementById('add-branch-btn').onclick = async () => {
+      const name = document.getElementById('br-name').value.trim();
+      const lat = Number(document.getElementById('br-lat').value);
+      const lng = Number(document.getElementById('br-lng').value);
+      const radiusMeters = Number(document.getElementById('br-radius').value) || 150;
+      const errBox = document.getElementById('branch-error');
+      if(!name || !document.getElementById('br-lat').value || !document.getElementById('br-lng').value || isNaN(lat) || isNaN(lng)){
+        errBox.innerHTML = `<div class="error-msg">اكتب اسم الفرع وحدد إحداثياته (دوس "استخدم موقعي الحالي" وانت واقف هناك)</div>`;
+        return;
+      }
+      try{
+        await branchesCol.add({ name, lat, lng, radiusMeters });
+        showToast(`تمت إضافة فرع ${name}`);
+        logAction('إضافة فرع', name);
+        document.getElementById('br-name').value = '';
+        document.getElementById('br-lat').value = '';
+        document.getElementById('br-lng').value = '';
+        document.getElementById('capture-loc-status').textContent = '';
+      }catch(e){ errBox.innerHTML = `<div class="error-msg">حصلت مشكلة أثناء الحفظ</div>`; }
+    };
+    app.querySelectorAll('[data-del-branch]').forEach(btn => {
+      btn.onclick = async () => {
+        try{ await branchesCol.doc(btn.getAttribute('data-del-branch')).delete(); showToast('تم حذف الفرع'); }
+        catch(e){ showToast('حصلت مشكلة أثناء الحذف', true); }
+      };
+    });
 
     document.getElementById('add-holiday-btn').onclick = async () => {
       const date = document.getElementById('hol-date').value;
@@ -2152,6 +2307,10 @@ function startLiveSync(){
   );
   invitesCol.onSnapshot(
     snap => { invites = snap.docs.map(d => ({id:d.id, ...d.data()})); route(); },
+    err => {}
+  );
+  branchesCol.onSnapshot(
+    snap => { branches = snap.docs.map(d => ({id:d.id, ...d.data()})); route(); },
     err => {}
   );
 }
