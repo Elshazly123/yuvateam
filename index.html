@@ -13,6 +13,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
   :root{
     --bg-deep:#10182B;
@@ -291,7 +292,7 @@ let dashboardMonth = (() => {
   const n = new Date();
   return n.getFullYear() + '-' + String(n.getMonth()+1).padStart(2,'0');
 })();
-let settings = { workDays:[0,1,2,3,4,6], deductionPerDay:0, deductionPerLateMinute:0, currency:'جنيه', defaultStartTime:'09:00', defaultEndTime:'17:00', overtimeRatePerMinute:0, locationEnabled:false };
+let settings = { workDays:[0,1,2,3,4,6], deductionPerDay:0, deductionPerLateMinute:0, currency:'جنيه', defaultStartTime:'09:00', defaultEndTime:'17:00', overtimeRatePerMinute:0, locationEnabled:false, verificationMethod:'fingerprint', qrEnabled:false };
 let branches = [];
 let holidays = [];
 let departments = [];
@@ -311,6 +312,15 @@ function todayKey(ts){ const d = new Date(ts); return d.getFullYear()+'-'+d.getM
 
 /* ============ Work schedule (configurable via Settings) ============ */
 function isWorkDay(date){ const wd = settings.workDays || [0,1,2,3,4,6]; return wd.includes(date.getDay()); }
+function getQrVerification(){
+  try{
+    const raw = sessionStorage.getItem('qrVerified');
+    if(!raw) return null;
+    const data = JSON.parse(raw);
+    if(Date.now() - data.ts > 30 * 60000) return null; // expires after 30 minutes
+    return data;
+  }catch(e){ return null; }
+}
 function distanceMeters(lat1, lng1, lat2, lng2){
   const R = 6371000; // Earth radius in meters
   const toRad = (d) => d * Math.PI / 180;
@@ -384,6 +394,8 @@ function getEmployeeShift(emp, date){
     if(entry.off) return null;
     return { start: entry.start || settings.defaultStartTime || '09:00', end: entry.end || settings.defaultEndTime || '17:00' };
   }
+  // no personal override for this weekday - fall back to the company-wide calendar
+  if(!isWorkDay(date)) return null;
   return { start: emp.startTime || settings.defaultStartTime || '09:00', end: emp.endTime || settings.defaultEndTime || '17:00' };
 }
 function computeEmployeeMonth(emp, year, month){
@@ -398,11 +410,10 @@ function computeEmployeeMonth(emp, year, month){
 
   for(let d = 1; d <= daysInMonth; d++){
     const date = new Date(year, month, d);
-    if(!isWorkDay(date)) continue;
     if(date > today) continue; // future day, not evaluated yet
 
     const shift = getEmployeeShift(emp, date);
-    if(!shift) continue; // employee has a custom schedule and doesn't work this weekday at all (part-time/shift)
+    if(!shift) continue; // this employee doesn't work this particular weekday at all (personal schedule or company calendar)
 
     if(isHoliday(date)){
       holidayDays++;
@@ -749,11 +760,13 @@ function renderEmployeeDashboard(){
   `;
   document.getElementById('punch-btn').onclick = () => openPunchModal(nextAction);
   document.getElementById('req-leave-btn').onclick = openLeaveRequestModal;
+  wireSelfieThumbnails(app);
   renderLeaveList(false);
 }
 
 /* ============ Punch modal (GPS + simulated fingerprint) ============ */
 function openPunchModal(type){
+  const useSelfie = settings.verificationMethod === 'selfie';
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
   backdrop.innerHTML = `
@@ -765,6 +778,18 @@ function openPunchModal(type){
         <button class="ghost-btn" id="retry-loc-btn" style="padding:4px; text-decoration:underline;">🔄 إعادة محاولة تحديد الموقع</button>
         <button class="ghost-btn" id="loc-help-btn" style="padding:4px; text-decoration:underline;">❓ مش عارف تفعّل الموقع؟</button>
       </div>
+
+      ${useSelfie ? `
+      <div id="selfie-wrap" style="display:flex; flex-direction:column; align-items:center; gap:10px; margin-bottom:12px;">
+        <video id="selfie-video" autoplay playsinline muted style="width:100%; max-width:220px; aspect-ratio:1/1; object-fit:cover; border-radius:14px; background:#000; transform:scaleX(-1);"></video>
+        <canvas id="selfie-canvas" style="display:none;"></canvas>
+      </div>
+      <div class="scan-status" id="scan-status">جاري تشغيل الكاميرا...</div>
+      <div id="selfie-actions" style="display:none; gap:8px; justify-content:center; margin:-2px 0 14px;">
+        <button class="ghost-btn" id="retry-cam-btn" style="padding:4px; text-decoration:underline;">🔄 إعادة محاولة تشغيل الكاميرا</button>
+        <button class="ghost-btn" id="cam-help-btn" style="padding:4px; text-decoration:underline;">❓ مش عارف تفعّل الكاميرا؟</button>
+      </div>
+      ` : `
       <div class="scanner" id="scanner">
         <svg viewBox="0 0 24 24" fill="none" stroke="#B23A2E" stroke-width="1.6">
           <path d="M12 2c-3 0-5.5 2.2-5.5 5.2 0 1.7.5 2.7.5 4.3 0 3.5-1.5 5.8-3 7.5" stroke-linecap="round"/>
@@ -779,9 +804,11 @@ function openPunchModal(type){
         </svg>
       </div>
       <div class="scan-status" id="scan-status">اضغط "تأكيد بالبصمة" للمتابعة</div>
+      `}
+
       <div class="modal-actions">
         <button class="secondary-btn" id="cancel-punch">إلغاء</button>
-        <button class="primary-btn" id="confirm-punch">تأكيد بالبصمة</button>
+        <button class="primary-btn" id="confirm-punch">${useSelfie ? '📸 التقط الصورة وسجّل' : 'تأكيد بالبصمة'}</button>
       </div>
     </div>
   `;
@@ -849,7 +876,43 @@ function openPunchModal(type){
   backdrop.querySelector('#retry-loc-btn').onclick = tryLocate;
   backdrop.querySelector('#loc-help-btn').onclick = openLocationHelpModal;
 
-  backdrop.querySelector('#cancel-punch').onclick = () => backdrop.remove();
+  /* ---- Selfie camera handling ---- */
+  let camStream = null;
+  let camReady = false;
+  const stopCamera = () => {
+    if(camStream){ camStream.getTracks().forEach(t => t.stop()); camStream = null; }
+  };
+
+  if(useSelfie){
+    const video = backdrop.querySelector('#selfie-video');
+    const status = backdrop.querySelector('#scan-status');
+    const camActions = backdrop.querySelector('#selfie-actions');
+    const confirmBtn = backdrop.querySelector('#confirm-punch');
+
+    const startCamera = async () => {
+      camReady = false;
+      confirmBtn.disabled = true;
+      status.textContent = 'جاري تشغيل الكاميرا...';
+      camActions.style.display = 'none';
+      try{
+        camStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'user' }, audio:false });
+        video.srcObject = camStream;
+        camReady = true;
+        confirmBtn.disabled = false;
+        status.textContent = 'الكاميرا شغالة — دوس "التقط الصورة" لما تكون جاهز';
+      }catch(e){
+        camReady = false;
+        confirmBtn.disabled = true;
+        status.textContent = '🚫 لازم تسمح بالوصول للكاميرا عشان تقدر تسجل';
+        camActions.style.display = 'flex';
+      }
+    };
+    startCamera();
+    backdrop.querySelector('#retry-cam-btn').onclick = startCamera;
+    backdrop.querySelector('#cam-help-btn').onclick = () => openLocationHelpModal(true);
+  }
+
+  backdrop.querySelector('#cancel-punch').onclick = () => { stopCamera(); backdrop.remove(); };
   backdrop.querySelector('#confirm-punch').onclick = (e) => {
     if(geoRestricted && withinRange === null){
       showToast('لسه بيتحدد موقعك، استنى ثانية وجرب تاني', true);
@@ -859,23 +922,53 @@ function openPunchModal(type){
       showToast('التسجيل مسموح بس من موقع الشركة المحدد', true);
       return;
     }
+    if(settings.qrEnabled){
+      const qr = getQrVerification();
+      const branchOk = qr && (!currentUser.branchId || qr.branchId === currentUser.branchId);
+      if(!branchOk){
+        showToast('لازم تعمل مسح لكود QR الموجود عند الباب الأول', true);
+        return;
+      }
+    }
+    if(useSelfie && !camReady){
+      showToast('لازم الكاميرا تشتغل الأول', true);
+      return;
+    }
     const btn = e.currentTarget;
     btn.disabled = true;
     backdrop.querySelector('#cancel-punch').disabled = true;
-    const scanner = backdrop.querySelector('#scanner');
-    const status = backdrop.querySelector('#scan-status');
-    scanner.classList.add('scanning');
-    status.textContent = 'جاري التحقق من البصمة...';
-    setTimeout(async () => {
-      scanner.classList.remove('scanning');
-      scanner.classList.add('done');
-      status.textContent = 'تم التحقق ✓';
-      await finalizePunch(type, coords, backdrop);
-    }, 1300);
+
+    if(useSelfie){
+      const video = backdrop.querySelector('#selfie-video');
+      const canvas = backdrop.querySelector('#selfie-canvas');
+      const status = backdrop.querySelector('#scan-status');
+      const size = 320;
+      canvas.width = size; canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      const vw = video.videoWidth, vh = video.videoHeight;
+      const cropSize = Math.min(vw, vh);
+      ctx.translate(size, 0); ctx.scale(-1, 1); // undo the mirrored preview so the saved photo isn't flipped
+      ctx.drawImage(video, (vw-cropSize)/2, (vh-cropSize)/2, cropSize, cropSize, 0, 0, size, size);
+      const selfieDataUrl = canvas.toDataURL('image/jpeg', 0.55);
+      stopCamera();
+      status.textContent = 'تم التقاط الصورة ✓';
+      finalizePunch(type, coords, backdrop, selfieDataUrl);
+    } else {
+      const scanner = backdrop.querySelector('#scanner');
+      const status = backdrop.querySelector('#scan-status');
+      scanner.classList.add('scanning');
+      status.textContent = 'جاري التحقق من البصمة...';
+      setTimeout(async () => {
+        scanner.classList.remove('scanning');
+        scanner.classList.add('done');
+        status.textContent = 'تم التحقق ✓';
+        await finalizePunch(type, coords, backdrop, null);
+      }, 1300);
+    }
   };
 }
 
-async function finalizePunch(type, coords, backdrop){
+async function finalizePunch(type, coords, backdrop, selfie){
   const record = {
     userId: currentUser.id,
     name: currentUser.name,
@@ -885,6 +978,7 @@ async function finalizePunch(type, coords, backdrop){
     lat: coords ? coords.lat : null,
     lng: coords ? coords.lng : null
   };
+  if(selfie) record.selfie = selfie;
   let ok = true;
   try{ await attendanceCol.add(record); }catch(e){ ok = false; }
 
@@ -892,6 +986,7 @@ async function finalizePunch(type, coords, backdrop){
   const kiosk = !!settings.kioskMode;
   modal.innerHTML = `
     <div class="stamp-result">
+      ${selfie ? `<img src="${selfie}" style="width:90px; height:90px; border-radius:50%; object-fit:cover; border:3px solid var(--teal);">` : ''}
       <div class="stamp-mark ${type}">${type === 'in' ? 'تم تسجيل الحضور' : 'تم تسجيل الانصراف'}</div>
       <div class="sub" style="margin:0;">${fmtDate(record.ts)} — الساعة ${fmtTime(record.ts)}${kiosk ? ' — شكرًا ' + currentUser.name : ''}</div>
       <button class="primary-btn" id="close-modal" style="margin-top:10px;">${kiosk ? 'تمام (هيرجع لشاشة الدخول)' : 'تمام'}</button>
@@ -916,17 +1011,30 @@ function renderAttendanceTable(records, showName){
       <td>${fmtTime(r.ts)}</td>
       <td><span class="type-tag ${r.type}">${r.type === 'in' ? 'حضور' : 'انصراف'}</span></td>
       <td class="mono" style="color:var(--text-mute); font-size:11.5px;">${r.lat ? `${r.lat}, ${r.lng}` : '—'}</td>
+      <td>${r.selfie ? `<img src="${r.selfie}" data-view-selfie="${r.selfie}" style="width:32px; height:32px; border-radius:50%; object-fit:cover; cursor:pointer; border:1.5px solid var(--panel-line);">` : '—'}</td>
     </tr>
   `).join('');
   return `
     <table>
       <thead><tr>
         ${showName ? '<th>الاسم</th>' : ''}
-        <th>التاريخ</th><th>الوقت</th><th>النوع</th><th>الموقع</th>
+        <th>التاريخ</th><th>الوقت</th><th>النوع</th><th>الموقع</th><th>سيلفي</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
   `;
+}
+function wireSelfieThumbnails(container){
+  container.querySelectorAll('[data-view-selfie]').forEach(img => {
+    img.onclick = () => {
+      const backdrop = document.createElement('div');
+      backdrop.className = 'modal-backdrop';
+      backdrop.innerHTML = `<div class="modal" style="max-width:340px;"><img src="${img.getAttribute('data-view-selfie')}" style="width:100%; border-radius:12px;"><button class="secondary-btn" id="close-selfie-view" style="margin-top:14px;">إغلاق</button></div>`;
+      document.body.appendChild(backdrop);
+      backdrop.querySelector('#close-selfie-view').onclick = () => backdrop.remove();
+      backdrop.onclick = (e) => { if(e.target === backdrop) backdrop.remove(); };
+    };
+  });
 }
 
 /* ============ Manager dashboard ============ */
@@ -944,22 +1052,47 @@ function renderManagerDashboard(perms){
   const pendingLeaves = leaveRequests.filter(l => l.status === 'pending').sort((a,b)=> b.requestedAt - a.requestedAt);
 
   const today = new Date();
-  const todayIsWorkDay = isWorkDay(today) && !isHoliday(today);
+  const companyTodayIsWorkDay = isWorkDay(today) && !isHoliday(today);
   const lateTodayNames = [], notYetNames = [];
-  if(todayIsWorkDay){
-    employees.forEach(e => {
-      if(hasApprovedLeave(e.id, today)) return;
-      const myTodayIns = attendance.filter(r => r.userId === e.id && r.type === 'in' && todayKey(r.ts) === todayStr).sort((a,b)=> a.ts - b.ts);
-      if(myTodayIns.length === 0){ notYetNames.push(e.name); return; }
-      const [sh, sm] = (e.startTime || settings.defaultStartTime || '09:00').split(':').map(Number);
-      const expected = new Date(today.getFullYear(), today.getMonth(), today.getDate(), sh, sm);
-      const diffMin = Math.round((new Date(myTodayIns[0].ts) - expected) / 60000);
-      if(diffMin > 0) lateTodayNames.push(`${e.name} (${fmtMinutes(diffMin)})`);
-    });
-  }
+  let anyoneScheduledToday = false;
+  employees.forEach(e => {
+    if(isHoliday(today)) return; // company-wide holiday overrides everyone
+    const shift = getEmployeeShift(e, today);
+    if(!shift) return; // this employee doesn't work today (their own schedule or the company calendar)
+    if(hasApprovedLeave(e.id, today)) return;
+    anyoneScheduledToday = true;
+    const myTodayIns = attendance.filter(r => r.userId === e.id && r.type === 'in' && todayKey(r.ts) === todayStr).sort((a,b)=> a.ts - b.ts);
+    if(myTodayIns.length === 0){ notYetNames.push(e.name); return; }
+    const [sh, sm] = shift.start.split(':').map(Number);
+    const expected = new Date(today.getFullYear(), today.getMonth(), today.getDate(), sh, sm);
+    const diffMin = Math.round((new Date(myTodayIns[0].ts) - expected) / 60000);
+    if(diffMin > 0) lateTodayNames.push(`${e.name} (${fmtMinutes(diffMin)})`);
+  });
+  const todayIsWorkDay = anyoneScheduledToday;
+
+  const celebrations = [];
+  employees.forEach(e => {
+    if(e.dateOfBirth){
+      const dob = new Date(e.dateOfBirth + 'T00:00:00');
+      if(dob.getMonth() === today.getMonth() && dob.getDate() === today.getDate()){
+        celebrations.push(`🎂 النهاردة عيد ميلاد ${e.name}!`);
+      }
+    }
+    if(e.hireDate){
+      const hd = new Date(e.hireDate + 'T00:00:00');
+      const years = today.getFullYear() - hd.getFullYear();
+      if(years > 0 && hd.getMonth() === today.getMonth() && hd.getDate() === today.getDate()){
+        celebrations.push(`🎉 النهاردة ذكرى انضمام ${e.name} للشركة — سنة ${years}!`);
+      }
+    }
+  });
 
   app.innerHTML = `
     <div class="dash">
+      ${celebrations.length > 0 ? `
+      <div class="panel" style="background:linear-gradient(135deg, var(--gold), var(--ink)); color:#fff;">
+        ${celebrations.map(c => `<div style="font-weight:700; font-size:14px; margin-bottom:4px;">${c}</div>`).join('')}
+      </div>` : ''}
       <div class="panel">
         <div class="row-between" style="margin-bottom:${perms.isManager ? '16px':'0'};">
           <div class="stat-row" style="margin:0; flex:1;">
@@ -1015,6 +1148,12 @@ function renderManagerDashboard(perms){
         <h2 style="margin-bottom:2px;">اتجاه الأداء عبر آخر 6 شهور</h2>
         <div class="sub">متوسط نسبة الحضور شهر بشهر — عشان تشوف التحسن أو التراجع مع الوقت</div>
         <div id="trend-chart"></div>
+      </div>
+
+      <div class="panel">
+        <h2 style="margin-bottom:2px;">🏆 الأكتر التزامًا</h2>
+        <div class="sub">أطول سلسلة حضور متتالية من غير تأخير ولا غياب (تشجيعية، مش عقابية)</div>
+        <div id="streak-board"></div>
       </div>
 
       <div class="panel">
@@ -1096,6 +1235,7 @@ function renderManagerDashboard(perms){
 
   renderDashboardMonth();
   renderTrendChart();
+  renderStreakBoard();
   document.getElementById('dash-month').onchange = (e) => {
     dashboardMonth = e.target.value || dashboardMonth;
     renderDashboardMonth();
@@ -1157,10 +1297,12 @@ function renderManagerDashboard(perms){
     }
     filtered.sort((a,b)=> b.ts - a.ts);
     document.getElementById('mgr-table').innerHTML = renderAttendanceTable(filtered, true);
+    wireSelfieThumbnails(document.getElementById('mgr-table'));
   };
   document.getElementById('filter-emp').onchange = applyFilters;
   document.getElementById('filter-date').onchange = applyFilters;
   document.getElementById('filter-search').oninput = applyFilters;
+  wireSelfieThumbnails(document.getElementById('mgr-table'));
 }
 
 
@@ -1203,6 +1345,39 @@ function renderTrendChart(){
   `;
 }
 
+function renderStreakBoard(){
+  const box = document.getElementById('streak-board');
+  if(!box) return;
+  const employees = users.filter(u => u.role === 'employee' && !pendingDeleteIds.has(u.id));
+  if(employees.length === 0){ box.innerHTML = `<div class="empty-row">مفيش موظفين لسه</div>`; return; }
+
+  const now = new Date();
+  const results = employees.map(e => {
+    // look across the current + previous month so a streak isn't artificially cut at month boundaries
+    const daysThisMonth = computeEmployeeMonth(e, now.getFullYear(), now.getMonth()).days;
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const daysPrevMonth = computeEmployeeMonth(e, prev.getFullYear(), prev.getMonth()).days;
+    const allDays = daysPrevMonth.concat(daysThisMonth);
+    let streak = 0;
+    for(let i = allDays.length - 1; i >= 0; i--){
+      const st = allDays[i].status;
+      if(st === 'holiday' || st === 'leave') continue; // neutral, doesn't break the streak
+      if(st === 'ontime') { streak++; continue; }
+      break; // late or absent ends the streak
+    }
+    return { emp: e, streak };
+  }).filter(r => r.streak > 0).sort((a,b) => b.streak - a.streak).slice(0, 5);
+
+  if(results.length === 0){ box.innerHTML = `<div class="empty-row">لسه مفيش سلاسل حضور تتسجل</div>`; return; }
+  const medals = ['🥇','🥈','🥉'];
+  box.innerHTML = results.map((r, i) => `
+    <div style="display:flex; align-items:center; gap:10px; padding:8px 0; ${i < results.length-1 ? 'border-bottom:1px solid var(--panel-line);' : ''}">
+      <div style="width:28px; font-size:16px; text-align:center;">${medals[i] || (i+1)}</div>
+      <div style="flex:1; font-size:13.5px;">${r.emp.name}</div>
+      <div class="type-tag in">${r.streak} يوم على التوالي</div>
+    </div>
+  `).join('');
+}
 function renderDashboardMonth(){
   const box = document.getElementById('dash-content');
   if(!box) return;
@@ -1348,6 +1523,36 @@ function exportMonthlyCsv(){
   URL.revokeObjectURL(url);
 }
 
+function renderMonthHeatmap(stats, year, monthIdx){
+  const HEATMAP_COLORS = { ontime:'var(--teal)', late:'var(--gold)', absent:'var(--ink)', leave:'#8fb8e8', holiday:'var(--panel-line)', empty:'transparent' };
+  const dayMap = {};
+  stats.days.forEach(d => { dayMap[d.date.getDate()] = d; });
+  const daysInMonth = new Date(year, monthIdx+1, 0).getDate();
+  // column order matches WEEKDAYS_AR: Sat,Sun,Mon,Tue,Wed,Thu,Fri
+  const colOf = (jsDay) => (jsDay + 1) % 7;
+  const firstCol = colOf(new Date(year, monthIdx, 1).getDay());
+
+  let cells = '';
+  for(let i = 0; i < firstCol; i++) cells += `<div style="width:22px; height:22px;"></div>`;
+  for(let d = 1; d <= daysInMonth; d++){
+    const entry = dayMap[d];
+    const color = entry ? (HEATMAP_COLORS[entry.status] || 'var(--panel-line)') : 'rgba(0,0,0,0.04)';
+    const title = entry ? `${d}: ${entry.status}` : `${d}`;
+    cells += `<div title="${title}" style="width:22px; height:22px; border-radius:5px; background:${color}; display:flex; align-items:center; justify-content:center; font-size:9px; color:rgba(0,0,0,0.35);">${d}</div>`;
+  }
+
+  return `
+    <div style="margin-bottom:16px;">
+      <div style="display:grid; grid-template-columns:repeat(7,22px); gap:4px; justify-content:center; margin-bottom:8px;">
+        ${WEEKDAYS_AR.map(w => `<div style="width:22px; text-align:center; font-size:9px; color:var(--text-mute);">${w.l[0]}</div>`).join('')}
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(7,22px); gap:4px; justify-content:center;">${cells}</div>
+      <div style="display:flex; gap:10px; justify-content:center; margin-top:10px; font-size:10.5px; color:var(--text-mute); flex-wrap:wrap;">
+        <span>🟩 في الميعاد</span><span>🟨 متأخر</span><span>🟥 غياب</span><span>🟦 إجازة</span>
+      </div>
+    </div>
+  `;
+}
 function openEmployeeMonthDetail(empId, year, monthIdx){
   const emp = users.find(u => u.id === empId);
   if(!emp) return;
@@ -1363,6 +1568,7 @@ function openEmployeeMonthDetail(empId, year, monthIdx){
     <div class="modal" style="max-width:480px; text-align:right;">
       <h3 style="text-align:center;">${emp.name}</h3>
       <div class="sub" style="text-align:center;">تفاصيل شهر ${monthName} — الحضور ${emp.startTime || settings.defaultStartTime || '09:00'} · الانصراف ${emp.endTime || settings.defaultEndTime || '17:00'}</div>
+      ${renderMonthHeatmap(stats, year, monthIdx)}
       <div style="max-height:340px; overflow-y:auto; margin-bottom:16px;">
         <table>
           <thead><tr><th>اليوم</th><th>الحالة</th><th>الحضور</th><th>التأخير</th><th>الانصراف</th><th>الإضافي</th></tr></thead>
@@ -1567,6 +1773,7 @@ function openAddEmployeeModal(){
       <div class="field"><label for="ne-title">المسمى الوظيفي</label><input id="ne-title" type="text" placeholder="مثال: مندوب مبيعات"></div>
       <div class="field"><label for="ne-phone">رقم الموبايل</label><input id="ne-phone" type="tel" placeholder="01xxxxxxxxx"></div>
       <div class="field"><label for="ne-hire">تاريخ التعيين</label><input id="ne-hire" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div class="field"><label for="ne-dob">تاريخ الميلاد (اختياري)</label><input id="ne-dob" type="date"></div>
       <div class="field"><label for="ne-salary">الراتب الأساسي (${settings.currency || 'جنيه'})</label><input id="ne-salary" type="number" min="0" step="50" placeholder="0"></div>
       <div class="field"><label for="ne-user">اسم المستخدم</label><input id="ne-user" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="مثال: mohamed"></div>
       <div class="field"><label for="ne-pass">كلمة المرور</label><input id="ne-pass" type="text" placeholder="كلمة مرور مبدئية"></div>
@@ -1606,6 +1813,7 @@ function openAddEmployeeModal(){
     const jobTitle = document.getElementById('ne-title').value.trim();
     const phone = document.getElementById('ne-phone').value.trim();
     const hireDate = document.getElementById('ne-hire').value;
+    const dateOfBirth = document.getElementById('ne-dob').value;
     const baseSalary = Number(document.getElementById('ne-salary').value) || 0;
     const errBox = document.getElementById('add-emp-error');
     if(!name || !username || !password){ errBox.innerHTML = `<div class="error-msg">من فضلك املأ كل الحقول</div>`; return; }
@@ -1613,7 +1821,7 @@ function openAddEmployeeModal(){
       errBox.innerHTML = `<div class="error-msg">اسم المستخدم ده مستخدم بالفعل</div>`; return;
     }
     try{
-      await usersCol.add({ username, password, name, role:'employee', startTime, endTime, departmentId, branchId, jobTitle, phone, hireDate, baseSalary });
+      await usersCol.add({ username, password, name, role:'employee', startTime, endTime, departmentId, branchId, jobTitle, phone, hireDate, dateOfBirth, baseSalary });
       backdrop.remove();
       showToast(`تمت إضافة ${name}`);
       logAction('إضافة موظف', name);
@@ -1637,6 +1845,7 @@ function openEditEmployeeModal(empId){
       <div class="field"><label for="es-title">المسمى الوظيفي</label><input id="es-title" type="text" value="${emp.jobTitle || ''}" placeholder="مثال: مندوب مبيعات"></div>
       <div class="field"><label for="es-phone">رقم الموبايل</label><input id="es-phone" type="tel" value="${emp.phone || ''}" placeholder="01xxxxxxxxx"></div>
       <div class="field"><label for="es-hire">تاريخ التعيين</label><input id="es-hire" type="date" value="${emp.hireDate || ''}"></div>
+      <div class="field"><label for="es-dob">تاريخ الميلاد (اختياري)</label><input id="es-dob" type="date" value="${emp.dateOfBirth || ''}"></div>
       <div class="field"><label for="es-salary">الراتب الأساسي (${settings.currency || 'جنيه'})</label><input id="es-salary" type="number" min="0" step="50" value="${emp.baseSalary || 0}"></div>
       <div class="field"><label for="es-time">ميعاد الحضور الرسمي</label><input id="es-time" type="time" value="${emp.startTime || settings.defaultStartTime || '09:00'}"></div>
       <div class="field"><label for="es-end">ميعاد الانصراف الرسمي</label><input id="es-end" type="time" value="${emp.endTime || settings.defaultEndTime || '17:00'}"></div>
@@ -1722,6 +1931,7 @@ function openEditEmployeeModal(empId){
     const jobTitle = document.getElementById('es-title').value.trim();
     const phone = document.getElementById('es-phone').value.trim();
     const hireDate = document.getElementById('es-hire').value;
+    const dateOfBirth = document.getElementById('es-dob').value;
     const baseSalary = Number(document.getElementById('es-salary').value) || 0;
     if(!newTime || !newEnd){ document.getElementById('es-error').innerHTML = `<div class="error-msg">اختار مواعيد صحيحة</div>`; return; }
     const useFlex = document.getElementById('es-flex-toggle').checked;
@@ -1736,7 +1946,7 @@ function openEditEmployeeModal(empId){
       });
     }
     try{
-      const updateData = { startTime: newTime, endTime: newEnd, departmentId: newDept, branchId: newBranch, jobTitle, phone, hireDate, baseSalary };
+      const updateData = { startTime: newTime, endTime: newEnd, departmentId: newDept, branchId: newBranch, jobTitle, phone, hireDate, dateOfBirth, baseSalary };
       updateData.customSchedule = useFlex ? customSchedule : firebase.firestore.FieldValue.delete();
       await usersCol.doc(empId).update(updateData);
       backdrop.remove();
@@ -1750,28 +1960,31 @@ function openEditEmployeeModal(empId){
 }
 
 /* ============ Location permission help ============ */
-function openLocationHelpModal(){
+function openLocationHelpModal(isCamera){
+  const subject = isCamera ? 'الكاميرا' : 'الموقع';
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
   backdrop.innerHTML = `
     <div class="modal" style="text-align:right; max-width:440px;">
-      <h3 style="text-align:center;">إزاي تفعّل صلاحية الموقع تاني؟</h3>
+      <h3 style="text-align:center;">إزاي تفعّل صلاحية ${subject} تاني؟</h3>
       <div class="sub" style="text-align:center;">لو ضغطت "رفض" بالغلط قبل كده، المتصفح مش هيسألك تاني لحد ما تفعّلها يدويًا من الإعدادات — خطوات بسيطة حسب جهازك:</div>
 
       <div style="background:#fff; border-radius:10px; padding:14px 16px; margin-bottom:12px; border:1.5px solid var(--panel-line);">
         <b style="font-size:13px;">📱 آيفون (Safari)</b>
-        <div class="sub" style="margin:6px 0 0; font-size:12.5px;">الإعدادات ⚙️ ← Safari ← الموقع (Location) ← اختار "اسأل" أو "السماح". أو: الإعدادات ← الخصوصية والأمان ← خدمات الموقع ← تأكد إنها مفعّلة لـ Safari.</div>
+        <div class="sub" style="margin:6px 0 0; font-size:12.5px;">${isCamera
+          ? 'الإعدادات ⚙️ ← Safari ← الكاميرا (Camera) ← اختار "اسأل" أو "السماح".'
+          : 'الإعدادات ⚙️ ← Safari ← الموقع (Location) ← اختار "اسأل" أو "السماح". أو: الإعدادات ← الخصوصية والأمان ← خدمات الموقع ← تأكد إنها مفعّلة لـ Safari.'}</div>
       </div>
       <div style="background:#fff; border-radius:10px; padding:14px 16px; margin-bottom:12px; border:1.5px solid var(--panel-line);">
         <b style="font-size:13px;">🤖 أندرويد (Chrome)</b>
-        <div class="sub" style="margin:6px 0 0; font-size:12.5px;">دوس على أيقونة 🔒 أو ⓘ جنب رابط الموقع فوق في المتصفح ← الأذونات (Permissions) ← الموقع ← اختار "اسأل في كل مرة" أو "السماح".</div>
+        <div class="sub" style="margin:6px 0 0; font-size:12.5px;">دوس على أيقونة 🔒 أو ⓘ جنب رابط الموقع فوق في المتصفح ← الأذونات (Permissions) ← ${isCamera ? 'الكاميرا' : 'الموقع'} ← اختار "اسأل في كل مرة" أو "السماح".</div>
       </div>
       <div style="background:#fff; border-radius:10px; padding:14px 16px; margin-bottom:16px; border:1.5px solid var(--panel-line);">
         <b style="font-size:13px;">💻 كمبيوتر (Chrome / Edge)</b>
-        <div class="sub" style="margin:6px 0 0; font-size:12.5px;">دوس على أيقونة 🔒 جنب رابط الموقع فوق ← الموقع (Location) ← اختار "السماح" ← اعمل تحديث للصفحة (Refresh).</div>
+        <div class="sub" style="margin:6px 0 0; font-size:12.5px;">دوس على أيقونة 🔒 جنب رابط الموقع فوق ← ${isCamera ? 'الكاميرا (Camera)' : 'الموقع (Location)'} ← اختار "السماح" ← اعمل تحديث للصفحة (Refresh).</div>
       </div>
 
-      <div class="sub" style="text-align:center;">بعد ما تفعّلها من الإعدادات، ارجع هنا ودوس "إعادة محاولة تحديد الموقع".</div>
+      <div class="sub" style="text-align:center;">بعد ما تفعّلها من الإعدادات، ارجع هنا ودوس "إعادة محاولة تشغيل ${subject}".</div>
       <div class="modal-actions">
         <button class="primary-btn" id="close-loc-help">فهمت، تمام</button>
       </div>
@@ -2058,11 +2271,30 @@ function renderSettingsPage(){
           وضع الجهاز المشترك (Kiosk) — بعد أي تسجيل حضور/انصراف يرجع لشاشة الدخول تلقائيًا
         </label>
 
+        <h3 style="font-size:15px; margin-bottom:10px;">طريقة التأكيد وقت تسجيل الحضور/الانصراف</h3>
+        <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px;">
+          <label style="display:flex; align-items:center; gap:8px; font-size:13px; background:#fff; padding:10px 14px; border-radius:8px; border:1.5px solid var(--panel-line);">
+            <input type="radio" name="set-verify" value="fingerprint" ${settings.verificationMethod !== 'selfie' ? 'checked' : ''}>
+            بصمة (شكل تفاعلي بسيط — أسرع)
+          </label>
+          <label style="display:flex; align-items:center; gap:8px; font-size:13px; background:#fff; padding:10px 14px; border-radius:8px; border:1.5px solid var(--panel-line);">
+            <input type="radio" name="set-verify" value="selfie" ${settings.verificationMethod === 'selfie' ? 'checked' : ''}>
+            📸 سيلفي حقيقي وقت كل تسجيل — بيتأكد فعليًا إن الموظف نفسه اللي بيسجل
+          </label>
+        </div>
+        <div class="sub" style="margin-top:-8px;">السيلفي بيتاخد بس وقت التسجيل ومبيتحفظش في مكان تاني، وبتقدر تشوفه في سجل الحضور.</div>
+
         <label style="display:flex; align-items:center; gap:8px; font-size:13px; background:#fff; padding:10px 14px; border-radius:8px; border:1.5px solid var(--panel-line); width:fit-content; margin-bottom:8px;">
           <input type="checkbox" id="set-loc-enabled" ${settings.locationEnabled ? 'checked' : ''}>
           محدش يقدر يسجل حضور/انصراف إلا وهو داخل نطاق أحد فروع الشركة (حدد الفروع تحت 👇)
         </label>
         <div class="sub" style="margin-top:-2px;">⚠️ ده رادع كويس، لكن ممكن يتحايل عليه بتطبيقات تزييف الموقع (Fake GPS) على بعض الأجهزة.</div>
+
+        <label style="display:flex; align-items:center; gap:8px; font-size:13px; background:#fff; padding:10px 14px; border-radius:8px; border:1.5px solid var(--panel-line); width:fit-content; margin-bottom:8px;">
+          <input type="checkbox" id="set-qr-enabled" ${settings.qrEnabled ? 'checked' : ''}>
+          محدش يقدر يسجل إلا لو مسح كود QR الملصوق عند باب الفرع أولًا (اطبع الكود من قسم "فروع الشركة" تحت)
+        </label>
+        <div class="sub" style="margin-top:-2px; margin-bottom:16px;">أقوى من تقييد الموقع بمفرده، لأنه محتاج وجود فعلي أمام الكود المطبوع (صعب التحايل عليه بتطبيقات تزييف الموقع).</div>
         <button class="primary-btn" id="save-settings-btn" style="width:auto; padding:12px 24px;">حفظ الإعدادات</button>
       </div>
 
@@ -2090,7 +2322,10 @@ function renderSettingsPage(){
                   <td>${b.name}</td>
                   <td class="mono" style="font-size:11.5px;">${b.lat}, ${b.lng}</td>
                   <td class="mono">${b.radiusMeters} م</td>
-                  <td><button class="secondary-btn" style="padding:5px 10px; font-size:12px; width:auto; color:var(--danger); border-color:rgba(196,69,59,0.4) !important;" data-del-branch="${b.id}">حذف</button></td>
+                  <td style="white-space:nowrap;">
+                    <button class="secondary-btn" style="padding:5px 10px; font-size:12px; width:auto;" data-show-qr="${b.id}">عرض QR</button>
+                    <button class="secondary-btn" style="padding:5px 10px; font-size:12px; width:auto; color:var(--danger); border-color:rgba(196,69,59,0.4) !important;" data-del-branch="${b.id}">حذف</button>
+                  </td>
                 </tr>
               `).join('')}
           </tbody>
@@ -2255,6 +2490,8 @@ function renderSettingsPage(){
         companyName: document.getElementById('set-company').value.trim(),
         logoUrl: document.getElementById('set-logo').value.trim(),
         kioskMode: document.getElementById('set-kiosk').checked,
+        verificationMethod: (app.querySelector('input[name="set-verify"]:checked') || {}).value || 'fingerprint',
+        qrEnabled: document.getElementById('set-qr-enabled').checked,
         locationEnabled: locEnabled
       };
       try{
@@ -2302,6 +2539,9 @@ function renderSettingsPage(){
         document.getElementById('capture-loc-status').textContent = '';
       }catch(e){ errBox.innerHTML = `<div class="error-msg">حصلت مشكلة أثناء الحفظ</div>`; }
     };
+    app.querySelectorAll('[data-show-qr]').forEach(btn => {
+      btn.onclick = () => openBranchQrModal(btn.getAttribute('data-show-qr'));
+    });
     app.querySelectorAll('[data-del-branch]').forEach(btn => {
       btn.onclick = async () => {
         try{ await branchesCol.doc(btn.getAttribute('data-del-branch')).delete(); showToast('تم حذف الفرع'); }
@@ -2484,6 +2724,48 @@ function revokeManager(mgrId){
   };
 }
 
+function openBranchQrModal(branchId){
+  const branch = branches.find(b => b.id === branchId);
+  if(!branch) return;
+  const qrUrl = location.origin + location.pathname + '?qr=' + encodeURIComponent(branchId);
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal" style="max-width:340px;">
+      <h3>كود QR — ${branch.name}</h3>
+      <div class="sub">اطبع الصفحة دي وحطها عند باب الفرع. الموظف يمسحها بكاميرا موبايله العادية قبل ما يسجل حضوره.</div>
+      <div id="qr-code-box" style="display:flex; justify-content:center; margin:16px 0;"></div>
+      <div class="modal-actions">
+        <button class="secondary-btn" id="qr-print-btn">🖨 طباعة</button>
+        <button class="primary-btn" id="qr-close-btn">إغلاق</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  const qrBox = backdrop.querySelector('#qr-code-box');
+  if(typeof QRCode !== 'undefined'){
+    new QRCode(qrBox, { text: qrUrl, width: 220, height: 220 });
+  } else {
+    qrBox.innerHTML = `<div class="empty-row">تعذر تحميل مكتبة الكود، تأكد من الاتصال بالإنترنت</div>`;
+  }
+  backdrop.querySelector('#qr-close-btn').onclick = () => backdrop.remove();
+  backdrop.querySelector('#qr-print-btn').onclick = () => {
+    const win = window.open('', '_blank');
+    win.document.write(`
+      <!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>QR - ${branch.name}</title>
+      <style>body{font-family:Tahoma,Arial,sans-serif; text-align:center; padding:60px;} h1{font-size:22px;} img{margin-top:20px;}</style>
+      </head><body>
+      <h1>${settings.companyName || 'ساعة الحضور'}</h1>
+      <div style="font-size:16px;">فرع: ${branch.name}</div>
+      <div>${qrBox.innerHTML}</div>
+      <div style="margin-top:20px; font-size:13px; color:#666;">امسح الكود ده بكاميرا موبايلك قبل ما تسجل حضورك أو انصرافك</div>
+      <script>window.onload = () => window.print();<\/script>
+      </body></html>
+    `);
+    win.document.close();
+  };
+}
+
 /* ============ Boot: seed + live sync ============ */
 async function seedIfEmpty(){
   try{
@@ -2550,6 +2832,18 @@ function startLiveSync(){
   startLiveSync();
   if('serviceWorker' in navigator){
     navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+
+  // If this page was opened by scanning an entrance QR code (?qr=branchId), remember it
+  // for a short window so the punch modal can confirm real physical presence.
+  const qrParam = new URLSearchParams(location.search).get('qr');
+  if(qrParam){
+    try{
+      sessionStorage.setItem('qrVerified', JSON.stringify({ branchId: qrParam, ts: Date.now() }));
+    }catch(e){}
+    const cleanUrl = location.pathname + location.hash;
+    history.replaceState({}, '', cleanUrl);
+    showToast('تم التحقق من موقعك عبر كود QR ✅');
   }
 })();
 </script>
