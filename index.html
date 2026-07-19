@@ -766,7 +766,8 @@ function renderEmployeeDashboard(){
 
 /* ============ Punch modal (GPS + simulated fingerprint) ============ */
 function openPunchModal(type){
-  const useSelfie = settings.verificationMethod === 'selfie';
+  const effectiveMethod = currentUser.verificationMethod || settings.verificationMethod;
+  const useSelfie = effectiveMethod === 'selfie';
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
   backdrop.innerHTML = `
@@ -1793,6 +1794,14 @@ function openAddEmployeeModal(){
           ${branches.map(b => `<option value="${b.id}">${b.name}</option>`).join('')}
         </select>
       </div>
+      <div class="field">
+        <label for="ne-verify">طريقة التأكيد وقت التسجيل</label>
+        <select id="ne-verify">
+          <option value="">حسب إعداد الشركة العام (${settings.verificationMethod === 'selfie' ? 'سيلفي' : 'بصمة'})</option>
+          <option value="fingerprint">بصمة دايمًا لهذا الموظف</option>
+          <option value="selfie">📸 سيلفي دايمًا لهذا الموظف</option>
+        </select>
+      </div>
       <div class="modal-actions">
         <button class="secondary-btn" id="cancel-add">إلغاء</button>
         <button class="primary-btn" id="save-add">حفظ الموظف</button>
@@ -1810,6 +1819,7 @@ function openAddEmployeeModal(){
     const endTime = document.getElementById('ne-end').value || settings.defaultEndTime || '17:00';
     const departmentId = document.getElementById('ne-dept').value;
     const branchId = document.getElementById('ne-branch').value;
+    const verificationMethod = document.getElementById('ne-verify').value;
     const jobTitle = document.getElementById('ne-title').value.trim();
     const phone = document.getElementById('ne-phone').value.trim();
     const hireDate = document.getElementById('ne-hire').value;
@@ -1821,7 +1831,7 @@ function openAddEmployeeModal(){
       errBox.innerHTML = `<div class="error-msg">اسم المستخدم ده مستخدم بالفعل</div>`; return;
     }
     try{
-      await usersCol.add({ username, password, name, role:'employee', startTime, endTime, departmentId, branchId, jobTitle, phone, hireDate, dateOfBirth, baseSalary });
+      await usersCol.add({ username, password, name, role:'employee', startTime, endTime, departmentId, branchId, verificationMethod, jobTitle, phone, hireDate, dateOfBirth, baseSalary });
       backdrop.remove();
       showToast(`تمت إضافة ${name}`);
       logAction('إضافة موظف', name);
@@ -1888,6 +1898,14 @@ function openEditEmployeeModal(empId){
           ${branches.map(b => `<option value="${b.id}" ${emp.branchId === b.id ? 'selected' : ''}>${b.name}</option>`).join('')}
         </select>
       </div>
+      <div class="field">
+        <label for="es-verify">طريقة التأكيد وقت التسجيل</label>
+        <select id="es-verify">
+          <option value="" ${!emp.verificationMethod ? 'selected' : ''}>حسب إعداد الشركة العام (${settings.verificationMethod === 'selfie' ? 'سيلفي' : 'بصمة'})</option>
+          <option value="fingerprint" ${emp.verificationMethod === 'fingerprint' ? 'selected' : ''}>بصمة دايمًا لهذا الموظف</option>
+          <option value="selfie" ${emp.verificationMethod === 'selfie' ? 'selected' : ''}>📸 سيلفي دايمًا لهذا الموظف</option>
+        </select>
+      </div>
       <div class="modal-actions">
         <button class="secondary-btn" id="es-cancel">إلغاء</button>
         <button class="primary-btn" id="es-save">حفظ</button>
@@ -1928,6 +1946,7 @@ function openEditEmployeeModal(empId){
     const newEnd = document.getElementById('es-end').value;
     const newDept = document.getElementById('es-dept').value;
     const newBranch = document.getElementById('es-branch').value;
+    const newVerify = document.getElementById('es-verify').value;
     const jobTitle = document.getElementById('es-title').value.trim();
     const phone = document.getElementById('es-phone').value.trim();
     const hireDate = document.getElementById('es-hire').value;
@@ -1947,6 +1966,7 @@ function openEditEmployeeModal(empId){
     }
     try{
       const updateData = { startTime: newTime, endTime: newEnd, departmentId: newDept, branchId: newBranch, jobTitle, phone, hireDate, dateOfBirth, baseSalary };
+      updateData.verificationMethod = newVerify ? newVerify : firebase.firestore.FieldValue.delete();
       updateData.customSchedule = useFlex ? customSchedule : firebase.firestore.FieldValue.delete();
       await usersCol.doc(empId).update(updateData);
       backdrop.remove();
